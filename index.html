@@ -19,35 +19,33 @@
             align-items: center;
         }
 
-        /* Franja horizontal que abarca todo el ancho */
         #focus-bar {
             position: absolute;
             top: 50%;
             left: 0;
             width: 100%;
-            height: 160px; /* Un poco más alta para las letras grandes */
+            height: 160px;
             background: rgba(0, 255, 65, 0.05);
             border-top: 2px solid rgba(0, 255, 65, 0.2);
             border-bottom: 2px solid rgba(0, 255, 65, 0.2);
             transform: translateY(-50%);
             z-index: 1;
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
         }
 
         #scanner-container {
             display: flex;
             align-items: center;
             z-index: 2;
-            height: 100vh; /* Contenedor abarca todo el alto */
+            height: 100vh;
         }
 
         .column {
             width: 100px;
             text-align: center;
-            height: 100vh; /* La columna permite ver letras en todo el alto */
+            height: 100vh;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            justify-content: center; /* Esto asegura que el inicio sea céntrico */
             overflow: hidden;
         }
 
@@ -55,14 +53,15 @@
             display: flex;
             flex-direction: column;
             font-size: 9rem;
-            line-height: 1;
+            will-change: transform;
         }
 
         .letter-strip div {
-            height: 160px; /* Debe coincidir con el alto de la barra para centrar */
+            height: 160px; 
             display: flex;
             justify-content: center;
             align-items: center;
+            flex-shrink: 0;
         }
 
         #cursor {
@@ -77,7 +76,6 @@
         .blink { animation: blink-anim 1s step-end infinite; }
         @keyframes blink-anim { from, to { opacity: 1; } 50% { opacity: 0; } }
 
-        /* Efecto de desvanecimiento en los bordes superior e inferior */
         #vignette {
             position: absolute;
             top: 0;
@@ -119,25 +117,32 @@
 
         strips.forEach((strip, i) => {
             let content = "";
-            // Generamos muchas letras para el efecto de scroll largo
-            for(let j=0; j<60; j++) {
-                content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
-            }
-            content += `<div>${target[i]}</div>`; // La letra ganadora
-            // Añadimos unas pocas letras extra abajo para que la ganadora quede centrada
-            for(let j=0; j<5; j++) {
-                content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
-            }
+            // 1. Letras iniciales (relleno arriba)
+            for(let j=0; j<10; j++) content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
+            
+            // 2. LA LETRA OBJETIVO (Esta es la que debe quedar al centro)
+            content += `<div class="target-letter">${target[i]}</div>`;
+            
+            // 3. Muchas letras abajo para que parezca que vienen de lejos
+            for(let j=0; j<60; j++) content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
+            
             strip.innerHTML = content;
+
+            // Posición inicial: empezamos mostrando las letras de abajo
+            const rowHeight = 160;
+            const startPos = -((strip.children.length - 1) * rowHeight);
+            strip.style.transform = `translateY(${startPos}px)`;
         });
 
         window.onload = () => {
             strips.forEach((strip, i) => {
-                const duration = 3000 + (i * 1000); // Freno escalonado dramático
-                const rowHeight = 160; // El alto de cada celda de letra
+                const duration = 3000 + (i * 1000);
+                const rowHeight = 160;
                 
-                // Calculamos la posición para que la letra correcta quede justo en la barra
-                const finalPos = -((strip.children.length - 6) * rowHeight);
+                // Calculamos la posición exacta de la letra con clase "target-letter"
+                // Para que quede al centro, la movemos a -(índice * altura)
+                // Como hay 10 letras antes de la ganadora, su índice es 10.
+                const finalPos = -(10 * rowHeight);
 
                 setTimeout(() => {
                     strip.style.transition = `transform ${duration}ms cubic-bezier(0.1, 0, 0.1, 1)`;
