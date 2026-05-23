@@ -2,13 +2,12 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>CATN - Central Archive</title>
-    <!-- Importamos la fuente estilo retro de Google Fonts -->
+    <title>CATN - Decryption Interface</title>
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         body {
             background-color: #000;
-            color: #00ff41; /* Verde Matrix clásico */
+            color: #00ff41;
             font-family: 'VT323', monospace;
             display: flex;
             justify-content: center;
@@ -16,69 +15,109 @@
             height: 100vh;
             margin: 0;
             overflow: hidden;
-            /* Efecto de resplandor sutil */
-            text-shadow: 0 0 10px rgba(0, 255, 65, 0.7), 0 0 20px rgba(0, 255, 65, 0.4);
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.7);
         }
-        #container {
+
+        #scanner-container {
+            position: relative;
             display: flex;
             align-items: center;
+            padding: 20px;
         }
-        #catn-text {
-            font-size: 8rem; /* Letras más grandes para lucir la fuente */
-            font-weight: normal;
-            letter-spacing: 10px;
+
+        /* La barra horizontal con menor opacidad */
+        #focus-bar {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 100px;
+            background: rgba(0, 255, 65, 0.1);
+            border-top: 1px solid rgba(0, 255, 65, 0.3);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.3);
+            transform: translateY(-50%);
+            z-index: 1;
+            pointer-events: none;
         }
+
+        .column {
+            font-size: 8rem;
+            width: 80px;
+            text-align: center;
+            height: 8rem;
+            overflow: hidden;
+            z-index: 2;
+        }
+
+        .letter-strip {
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.1s linear;
+        }
+
         #cursor {
             font-size: 8rem;
             background-color: #00ff41;
-            color: #00ff41;
-            width: 50px;
-            height: 90px;
-            margin-left: 15px;
-            display: none;
-            animation: blink 1s step-end infinite;
+            width: 45px;
+            height: 85px;
+            margin-left: 20px;
+            opacity: 0;
+            z-index: 2;
         }
-        @keyframes blink {
-            from, to { opacity: 1; }
-            50% { opacity: 0; }
-        }
+
+        .blink { animation: blink-anim 1s step-end infinite; }
+        @keyframes blink-anim { from, to { opacity: 1; } 50% { opacity: 0; } }
     </style>
 </head>
 <body>
 
-    <div id="container">
-        <div id="catn-text">****</div>
+    <div id="scanner-container">
+        <div id="focus-bar"></div>
+        <div class="column"><div id="col-0" class="letter-strip"></div></div>
+        <div class="column"><div id="col-1" class="letter-strip"></div></div>
+        <div class="column"><div id="col-2" class="letter-strip"></div></div>
+        <div class="column"><div id="col-3" class="letter-strip"></div></div>
         <div id="cursor">_</div>
     </div>
 
     <script>
         const target = "CATN";
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*";
-        const display = document.getElementById("catn-text");
-        const cursor = document.getElementById("cursor");
-        
-        let iterations = 0;
-        
-        // Aumentamos el intervalo a 120ms para que sea más lento
-        const interval = setInterval(() => {
-            display.innerText = target.split("")
-                .map((letter, index) => {
-                    // Cambiamos el multiplicador a 12 para que cada letra 
-                    // tarde más tiempo en detenerse
-                    if(iterations > index * 12) {
-                        return target[index];
-                    }
-                    return chars[Math.floor(Math.random() * chars.length)];
-                })
-                .join("");
-            
-            if(iterations >= target.length * 12) {
-                clearInterval(interval);
-                cursor.style.display = "inline-block";
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*".split("");
+        const strips = [
+            document.getElementById("col-0"),
+            document.getElementById("col-1"),
+            document.getElementById("col-2"),
+            document.getElementById("col-3")
+        ];
+
+        // Llenamos las columnas con letras aleatorias
+        strips.forEach((strip, i) => {
+            let content = "";
+            for(let j=0; j<30; j++) {
+                content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
             }
-            
-            iterations += 1;
-        }, 120); // Velocidad global del cambio
+            content += `<div id="final-${i}">${target[i]}</div>`; // La letra final
+            strip.innerHTML = content;
+        });
+
+        // Animación de caída
+        strips.forEach((strip, i) => {
+            const duration = 2000 + (i * 800); // Cada columna tarda más en frenar
+            const rowHeight = strip.children[0].offsetHeight;
+            const finalPos = -(strip.children.length - 1) * rowHeight;
+
+            setTimeout(() => {
+                strip.style.transition = `transform ${duration}ms cubic-bezier(0.1, 0, 0.1, 1)`;
+                strip.style.transform = `translateY(${finalPos}px)`;
+            }, 100);
+
+            // Mostrar cursor al final de la última letra
+            if(i === 3) {
+                setTimeout(() => {
+                    document.getElementById("cursor").classList.add("blink");
+                }, duration + 500);
+            }
+        });
     </script>
 </body>
 </html>
