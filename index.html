@@ -9,22 +9,16 @@
             background-color: #000;
             color: #00ff41;
             font-family: 'VT323', monospace;
-            margin: 0;
-            padding: 0;
-            height: 100vh;
-            width: 100vw;
+            margin: 0; padding: 0;
+            height: 100vh; width: 100vw;
             overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            display: flex; justify-content: center; align-items: center;
         }
 
         #focus-bar {
             position: absolute;
-            top: 50%;
-            left: 0;
-            width: 100%;
-            height: 160px;
+            top: 50%; left: 0;
+            width: 100%; height: 160px;
             background: rgba(0, 255, 65, 0.05);
             border-top: 2px solid rgba(0, 255, 65, 0.2);
             border-bottom: 2px solid rgba(0, 255, 65, 0.2);
@@ -33,62 +27,46 @@
         }
 
         #scanner-container {
-            display: flex;
-            align-items: center;
-            z-index: 2;
-            height: 100vh;
+            display: flex; align-items: center;
+            z-index: 2; height: 160px; /* Altura fija para contener solo la fila central */
         }
 
         .column {
             width: 100px;
             text-align: center;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            overflow: hidden;
+            height: 160px; 
+            overflow: visible; /* Dejamos que las letras se vean fuera de la barra */
+            display: flex; flex-direction: column;
         }
 
         .letter-strip {
-            display: flex;
-            flex-direction: column;
+            display: flex; flex-direction: column;
             font-size: 9rem;
-            will-change: transform;
+            transition: transform 0s; /* Inicialmente sin transición */
         }
 
         .letter-strip div {
-            height: 160px; 
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            height: 160px; /* Tamaño exacto de la barra */
+            display: flex; justify-content: center; align-items: center;
             flex-shrink: 0;
         }
 
         #cursor {
             font-size: 9rem;
             background-color: #00ff41;
-            width: 50px;
-            height: 110px;
+            width: 50px; height: 110px;
             margin-left: 20px;
-            opacity: 0;
+            display: none;
         }
 
         .blink { animation: blink-anim 1s step-end infinite; }
         @keyframes blink-anim { from, to { opacity: 1; } 50% { opacity: 0; } }
 
         #vignette {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(to bottom, 
-                black 0%, 
-                transparent 30%, 
-                transparent 70%, 
-                black 100%);
-            z-index: 3;
-            pointer-events: none;
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: linear-gradient(to bottom, black 0%, transparent 35%, transparent 65%, black 100%);
+            z-index: 3; pointer-events: none;
         }
     </style>
 </head>
@@ -107,7 +85,7 @@
 
     <script>
         const target = "CATN";
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$@%".split("");
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$@%&?".split("");
         const strips = [
             document.getElementById("col-0"),
             document.getElementById("col-1"),
@@ -116,46 +94,46 @@
         ];
 
         const rowHeight = 160;
-        const stopIndex = 15; // La posición donde pondremos la letra correcta
+        const targetIndex = 5; // La letra real estará en la posición 5 (empezando de 0)
 
+        // 1. Construir las tiras de letras
         strips.forEach((strip, i) => {
             let content = "";
-            
-            // Creamos la tira de letras
-            for(let j = 0; j < 80; j++) {
-                // Si llegamos a la posición de parada, ponemos la letra de CATN
-                if (j === stopIndex) {
+            for (let j = 0; j < 40; j++) {
+                if (j === targetIndex) {
                     content += `<div>${target[i]}</div>`;
                 } else {
                     content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
                 }
             }
-            
             strip.innerHTML = content;
-
-            // Empezamos desde abajo
-            const startPos = -((80 - 1) * rowHeight);
-            strip.style.transform = `translateY(${startPos}px)`;
+            
+            // Posición inicial: muy abajo (lejos de la letra 5)
+            strip.style.transform = `translateY(-${(30 * rowHeight)}px)`;
         });
 
-        window.onload = () => {
+        // 2. Iniciar animación cuando todo esté listo
+        window.addEventListener('load', () => {
             setTimeout(() => {
                 strips.forEach((strip, i) => {
-                    const duration = 2500 + (i * 800);
-                    // Frenamos exactamente en el stopIndex (donde pusimos la letra real)
-                    const finalPos = -(stopIndex * rowHeight);
-
-                    strip.style.transition = `transform ${duration}ms cubic-bezier(0.1, 0, 0.1, 1)`;
-                    strip.style.transform = `translateY(${finalPos}px)`;
+                    const duration = 3000 + (i * 800);
+                    
+                    // Activamos la transición suave
+                    strip.style.transition = `transform ${duration}ms cubic-bezier(0.15, 0, 0.05, 1)`;
+                    
+                    // La letra ganadora (targetIndex) queda centrada al moverla a -(index * height)
+                    strip.style.transform = `translateY(-${(targetIndex * rowHeight)}px)`;
 
                     if(i === 3) {
                         setTimeout(() => {
-                            document.getElementById("cursor").classList.add("blink");
-                        }, duration + 500);
+                            const cursor = document.getElementById("cursor");
+                            cursor.style.display = "block";
+                            cursor.classList.add("blink");
+                        }, duration + 300);
                     }
                 });
-            }, 200);
-        };
+            }, 500); // Pequeña pausa inicial
+        });
     </script>
 </body>
 </html>
