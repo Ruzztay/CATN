@@ -45,7 +45,7 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
-            justify-content: center; /* Esto asegura que el inicio sea céntrico */
+            justify-content: center;
             overflow: hidden;
         }
 
@@ -107,7 +107,7 @@
 
     <script>
         const target = "CATN";
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789XY#$".split("");
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$@%".split("");
         const strips = [
             document.getElementById("col-0"),
             document.getElementById("col-1"),
@@ -115,46 +115,46 @@
             document.getElementById("col-3")
         ];
 
+        const rowHeight = 160;
+        const stopIndex = 15; // La posición donde pondremos la letra correcta
+
         strips.forEach((strip, i) => {
             let content = "";
-            // 1. Letras iniciales (relleno arriba)
-            for(let j=0; j<10; j++) content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
             
-            // 2. LA LETRA OBJETIVO (Esta es la que debe quedar al centro)
-            content += `<div class="target-letter">${target[i]}</div>`;
-            
-            // 3. Muchas letras abajo para que parezca que vienen de lejos
-            for(let j=0; j<60; j++) content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
+            // Creamos la tira de letras
+            for(let j = 0; j < 80; j++) {
+                // Si llegamos a la posición de parada, ponemos la letra de CATN
+                if (j === stopIndex) {
+                    content += `<div>${target[i]}</div>`;
+                } else {
+                    content += `<div>${chars[Math.floor(Math.random() * chars.length)]}</div>`;
+                }
+            }
             
             strip.innerHTML = content;
 
-            // Posición inicial: empezamos mostrando las letras de abajo
-            const rowHeight = 160;
-            const startPos = -((strip.children.length - 1) * rowHeight);
+            // Empezamos desde abajo
+            const startPos = -((80 - 1) * rowHeight);
             strip.style.transform = `translateY(${startPos}px)`;
         });
 
         window.onload = () => {
-            strips.forEach((strip, i) => {
-                const duration = 3000 + (i * 1000);
-                const rowHeight = 160;
-                
-                // Calculamos la posición exacta de la letra con clase "target-letter"
-                // Para que quede al centro, la movemos a -(índice * altura)
-                // Como hay 10 letras antes de la ganadora, su índice es 10.
-                const finalPos = -(10 * rowHeight);
+            setTimeout(() => {
+                strips.forEach((strip, i) => {
+                    const duration = 2500 + (i * 800);
+                    // Frenamos exactamente en el stopIndex (donde pusimos la letra real)
+                    const finalPos = -(stopIndex * rowHeight);
 
-                setTimeout(() => {
                     strip.style.transition = `transform ${duration}ms cubic-bezier(0.1, 0, 0.1, 1)`;
                     strip.style.transform = `translateY(${finalPos}px)`;
-                }, 500);
 
-                if(i === 3) {
-                    setTimeout(() => {
-                        document.getElementById("cursor").classList.add("blink");
-                    }, duration + 800);
-                }
-            });
+                    if(i === 3) {
+                        setTimeout(() => {
+                            document.getElementById("cursor").classList.add("blink");
+                        }, duration + 500);
+                    }
+                });
+            }, 200);
         };
     </script>
 </body>
