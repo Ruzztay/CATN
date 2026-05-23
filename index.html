@@ -3,38 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <title>CATN - Central Archive</title>
+    <!-- Importamos la fuente estilo retro de Google Fonts -->
+    <link href="https://googleapis.com" rel="stylesheet">
     <style>
         body {
             background-color: #000;
-            color: #0f0;
-            font-family: 'Courier New', Courier, monospace;
+            color: #00ff41; /* Verde Matrix clásico */
+            font-family: 'VT323', monospace;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
             overflow: hidden;
-            text-shadow: 0 0 8px #0f0;
+            /* Efecto de resplandor sutil */
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.7), 0 0 20px rgba(0, 255, 65, 0.4);
         }
         #container {
             display: flex;
             align-items: center;
         }
         #catn-text {
-            font-size: 5rem;
-            font-weight: bold;
-            letter-spacing: 15px;
+            font-size: 8rem; /* Letras más grandes para lucir la fuente */
+            font-weight: normal;
+            letter-spacing: 10px;
         }
-        /* El cursor parpadeante */
         #cursor {
-            font-size: 5rem;
-            font-weight: bold;
-            background-color: #0f0;
-            color: #0f0;
-            width: 35px;
-            height: 65px;
-            margin-left: 10px;
-            display: none; /* Oculto al inicio */
+            font-size: 8rem;
+            background-color: #00ff41;
+            color: #00ff41;
+            width: 50px;
+            height: 90px;
+            margin-left: 15px;
+            display: none;
             animation: blink 1s step-end infinite;
         }
         @keyframes blink {
@@ -58,24 +59,26 @@
         
         let iterations = 0;
         
+        // Aumentamos el intervalo a 120ms para que sea más lento
         const interval = setInterval(() => {
             display.innerText = target.split("")
                 .map((letter, index) => {
-                    if(iterations > index * 7) {
+                    // Cambiamos el multiplicador a 12 para que cada letra 
+                    // tarde más tiempo en detenerse
+                    if(iterations > index * 12) {
                         return target[index];
                     }
                     return chars[Math.floor(Math.random() * chars.length)];
                 })
                 .join("");
             
-            if(iterations >= target.length * 7) {
+            if(iterations >= target.length * 12) {
                 clearInterval(interval);
-                // Cuando termina el efecto, mostramos el cursor parpadeante
                 cursor.style.display = "inline-block";
             }
             
             iterations += 1;
-        }, 80);
+        }, 120); // Velocidad global del cambio
     </script>
 </body>
 </html>
