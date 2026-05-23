@@ -16,38 +16,66 @@
             overflow: hidden;
             text-shadow: 0 0 8px #0f0;
         }
+        #container {
+            display: flex;
+            align-items: center;
+        }
         #catn-text {
             font-size: 5rem;
             font-weight: bold;
             letter-spacing: 15px;
         }
+        /* El cursor parpadeante */
+        #cursor {
+            font-size: 5rem;
+            font-weight: bold;
+            background-color: #0f0;
+            color: #0f0;
+            width: 35px;
+            height: 65px;
+            margin-left: 10px;
+            display: none; /* Oculto al inicio */
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            from, to { opacity: 1; }
+            50% { opacity: 0; }
+        }
     </style>
 </head>
 <body>
 
-    <div id="catn-text">****</div>
+    <div id="container">
+        <div id="catn-text">****</div>
+        <div id="cursor">_</div>
+    </div>
 
     <script>
         const target = "CATN";
         const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*";
         const display = document.getElementById("catn-text");
+        const cursor = document.getElementById("cursor");
         
         let iterations = 0;
         
         const interval = setInterval(() => {
             display.innerText = target.split("")
                 .map((letter, index) => {
-                    if(iterations > index * 7) { // Velocidad de detención por letra
+                    if(iterations > index * 7) {
                         return target[index];
                     }
                     return chars[Math.floor(Math.random() * chars.length)];
                 })
                 .join("");
             
-            if(iterations >= target.length * 7) clearInterval(interval);
+            if(iterations >= target.length * 7) {
+                clearInterval(interval);
+                // Cuando termina el efecto, mostramos el cursor parpadeante
+                cursor.style.display = "inline-block";
+            }
             
             iterations += 1;
-        }, 80); // Velocidad del cambio (en milisegundos)
+        }, 80);
     </script>
 </body>
 </html>
