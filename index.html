@@ -1,9 +1,53 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>CATN - Proyecto Cobra</title>
+    <meta charset="UTF-8">
+    <title>CATN - Central Archive</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            text-shadow: 0 0 8px #0f0;
+        }
+        #catn-text {
+            font-size: 5rem;
+            font-weight: bold;
+            letter-spacing: 15px;
+        }
+    </style>
 </head>
-<body style="background-color: black; color: #00ff00; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh;">
-    <h1>CATN</h1>
+<body>
+
+    <div id="catn-text">****</div>
+
+    <script>
+        const target = "CATN";
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*";
+        const display = document.getElementById("catn-text");
+        
+        let iterations = 0;
+        
+        const interval = setInterval(() => {
+            display.innerText = target.split("")
+                .map((letter, index) => {
+                    if(iterations > index * 7) { // Velocidad de detención por letra
+                        return target[index];
+                    }
+                    return chars[Math.floor(Math.random() * chars.length)];
+                })
+                .join("");
+            
+            if(iterations >= target.length * 7) clearInterval(interval);
+            
+            iterations += 1;
+        }, 80); // Velocidad del cambio (en milisegundos)
+    </script>
 </body>
 </html>
