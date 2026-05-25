@@ -15,7 +15,7 @@
             display: flex; justify-content: center; align-items: center;
         }
 
-        /* Scanlines Provisionales */
+        /* Scanlines */
         body::before {
             content: " ";
             display: block;
@@ -40,22 +40,22 @@
 
         #scanner-container {
             display: flex; align-items: center;
-            z-index: 2; height: 100vh;
+            z-index: 2;
+            height: 160px; /* RESTRICCIÓN DE ALTURA */
+            overflow: hidden; /* ESTO OCULTA LAS LETRAS SOBRANTES */
         }
 
         .column {
             width: 100px;
             text-align: center;
-            height: 100vh;
+            height: 160px; 
             display: flex; flex-direction: column;
-            justify-content: center;
-            overflow: hidden;
+            overflow: visible; 
         }
 
         .letter-strip {
             display: flex; flex-direction: column;
             font-size: 9rem;
-            /* CAMBIO CLAVE: Transición por pasos, no fluida */
             transition: transform 0.1s steps(1); 
         }
 
@@ -83,12 +83,9 @@
             z-index: 5; pointer-events: none;
         }
 
-        /* Mensaje inicial */
         #boot-msg {
-            position: absolute;
-            bottom: 20px;
-            font-size: 1.5rem;
-            opacity: 0.7;
+            position: absolute; bottom: 20px;
+            font-size: 1.5rem; opacity: 0.7;
         }
     </style>
 </head>
@@ -120,7 +117,6 @@
         const targetIndex = 5; 
         const totalRows = 50;
 
-        // Audio Context
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function playBeep(freq, dur, vol = 0.05) {
             const osc = audioCtx.createOscillator();
@@ -133,15 +129,13 @@
             osc.start(); osc.stop(audioCtx.currentTime + dur);
         }
 
-        // Construir tiras
         strips.forEach((strip, i) => {
             let content = "";
             for (let j = 0; j < totalRows; j++) {
                 content += `<div>${j === targetIndex ? target[i] : chars[Math.floor(Math.random() * chars.length)]}</div>`;
             }
             strip.innerHTML = content;
-            // Empezar en una posición aleatoria abajo
-            strip.style.transform = `translateY(-${(totalRows - 10) * rowHeight}px)`;
+            strip.style.transform = `translateY(-${(totalRows - 1) * rowHeight}px)`;
         });
 
         document.body.addEventListener('click', () => {
@@ -149,18 +143,17 @@
             document.getElementById('boot-msg').style.display = 'none';
             
             strips.forEach((strip, i) => {
-                let currentPos = (totalRows - 10);
-                const speed = 60 + (i * 20); // Cada columna tiene su propio ritmo
+                let currentPos = (totalRows - 1);
+                const speed = 50 + (i * 30); 
 
                 const moveInterval = setInterval(() => {
                     if (currentPos > targetIndex) {
                         currentPos--;
                         strip.style.transform = `translateY(-${currentPos * rowHeight}px)`;
-                        // Sonido sutil de procesamiento por cada "salto"
-                        if (Math.random() > 0.7) playBeep(100, 0.05, 0.02);
+                        if (Math.random() > 0.8) playBeep(80, 0.05, 0.02);
                     } else {
                         clearInterval(moveInterval);
-                        playBeep(200, 0.2, 0.1); // Sonido de anclaje
+                        playBeep(180, 0.2, 0.08); 
                         if (i === 3) showCursor();
                     }
                 }, speed);
@@ -171,7 +164,7 @@
             const cursor = document.getElementById("cursor");
             cursor.style.display = "block";
             cursor.classList.add("blink");
-            playBeep(400, 0.3, 0.1);
+            playBeep(350, 0.4, 0.1);
         }
     </script>
 </body>
