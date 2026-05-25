@@ -1,175 +1,381 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>CATN - Terminal Interface</title>
-    <link href="https://googleapis.com" rel="stylesheet">
-    <style>
-        body, html {
-            background-color: #000;
-            color: #00ff41;
-            font-family: 'VT323', monospace;
-            margin: 0; padding: 0;
-            height: 100vh; width: 100vw;
-            overflow: hidden;
-            display: flex; justify-content: center; align-items: center;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CATN - Terminal Interface</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        /* Scanlines */
-        body::before {
-            content: " ";
-            display: block;
-            position: absolute;
-            top: 0; left: 0; bottom: 0; right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%);
-            z-index: 10;
-            background-size: 100% 4px;
-            pointer-events: none;
-        }
+    body, html {
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      overflow: hidden;
+      font-family: 'Courier New', Courier, monospace;
+    }
 
-        #focus-bar {
-            position: absolute;
-            top: 50%; left: 0;
-            width: 100%; height: 160px;
-            background: rgba(0, 255, 65, 0.05);
-            border-top: 2px solid rgba(0, 255, 65, 0.3);
-            border-bottom: 2px solid rgba(0, 255, 65, 0.3);
-            transform: translateY(-50%);
-            z-index: 1;
-        }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent, transparent 2px,
+        rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px
+      );
+      pointer-events: none;
+      z-index: 100;
+    }
 
-        #scanner-container {
-            display: flex; align-items: center;
-            z-index: 2;
-            height: 100vh; /* Volvemos a pantalla completa */
-            /* EFECTO CLAVE: Desvanecimiento gradual hacia arriba y abajo */
-            -webkit-mask-image: linear-gradient(to bottom, 
-                transparent 0%, 
-                black 40%, 
-                black 60%, 
-                transparent 100%);
-            mask-image: linear-gradient(to bottom, 
-                transparent 0%, 
-                black 45%, 
-                black 55%, 
-                transparent 100%);
-        }
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.88) 100%);
+      pointer-events: none;
+      z-index: 99;
+    }
 
-        .column {
-            width: 100px;
-            text-align: center;
-            height: 100vh; 
-            display: flex; flex-direction: column;
-            justify-content: center;
-            overflow: hidden;
-        }
+    #scaler {
+      position: fixed;
+      top: 0; left: 0;
+      width: 2560px;
+      height: 1440px;
+      transform-origin: top left;
+    }
 
-        .letter-strip {
-            display: flex; flex-direction: column;
-            font-size: 9rem;
-            transition: transform 0.1s steps(1); 
-        }
+    /* El stage es solo un contenedor de posición, sin grid centrado */
+    #stage {
+      position: absolute;
+      top: 0; left: 0;
+      width: 2560px;
+      height: 1440px;
+      z-index: 1;
+      overflow: hidden;
+    }
 
-        .letter-strip div {
-            height: 160px;
-            display: flex; justify-content: center; align-items: center;
-            flex-shrink: 0;
-        }
+    /* Grid interno: posicionado exactamente por JS */
+    #grid {
+      position: absolute;
+      display: grid;
+      /* cols y rows seteados por JS */
+    }
 
-        #cursor {
-            font-size: 9rem;
-            background-color: #00ff41;
-            width: 50px; height: 110px;
-            margin-left: 20px;
-            display: none;
-        }
+    .cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      user-select: none;
+    }
 
-        .blink { animation: blink-anim 1s step-end infinite; }
-        @keyframes blink-anim { from, to { opacity: 1; } 50% { opacity: 0; } }
+    .c-dim    { color: rgba(0,255,65,0.12); }
+    .c-near   { color: rgba(0,255,65,0.32); }
+    .c-mid    { color: rgba(0,255,65,0.60); }
+    .c-hot    { color: #00ff41; text-shadow: 0 0 8px rgba(0,255,65,0.6); }
+    .c-target { color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 6px #fff; }
 
-        #boot-msg {
-            position: absolute; bottom: 20px;
-            font-size: 1.5rem; opacity: 0.5;
-        }
-    </style>
+    #focus-bar {
+      position: absolute;
+      left: 0;
+      width: 2560px;
+      background: rgba(0,255,65,0.06);
+      border-top:    1px solid rgba(0,255,65,0.30);
+      border-bottom: 1px solid rgba(0,255,65,0.30);
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    #boot-msg {
+      position: absolute;
+      bottom: 60px;
+      width: 2560px;
+      text-align: center;
+      color: rgba(0,255,65,0.65);
+      font-size: 28px;
+      letter-spacing: 0.22em;
+      z-index: 200;
+      animation: blink 1.3s step-end infinite;
+    }
+
+    #prompt-line {
+      position: absolute;
+      display: none;
+      align-items: center;
+      z-index: 200;
+      font-size: 100px;
+      color: rgba(0,255,65,0.85);
+      white-space: nowrap;
+    }
+    #prompt-prefix { color: rgba(0,255,65,0.55); margin-right: 0.3em; }
+    #prompt-input {
+      background: transparent;
+      border: none; outline: none;
+      color: rgba(0,255,65,0.85);
+      font-family: 'Courier New', monospace;
+      font-size: inherit;
+      caret-color: transparent;
+      letter-spacing: 0.08em;
+      min-width: 1px; width: 1px;
+    }
+    #prompt-cursor {
+      display: inline-block;
+      width: 0.55em; height: 0.85em;
+      background: #00ff41;
+      margin-left: 4px;
+      vertical-align: middle;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  </style>
 </head>
 <body>
+<div id="scaler">
+  <div id="stage">
+    <div id="grid"></div>
+  </div>
+  <div id="focus-bar"></div>
+  <div id="boot-msg">[ HAGA CLIC PARA INICIAR SECUENCIA ]</div>
+  <div id="prompt-line">
+    <span id="prompt-prefix">:\&gt;&nbsp;</span>
+    <input id="prompt-input" type="text" autocomplete="off" spellcheck="false"/>
+    <span id="prompt-cursor"></span>
+  </div>
+</div>
 
-    <div id="focus-bar"></div>
-    <div id="boot-msg">ESTABLECIENDO CONEXIÓN... HAGA CLIC</div>
+<script>
+(function(){
 
-    <div id="scanner-container">
-        <div class="column"><div id="col-0" class="letter-strip"></div></div>
-        <div class="column"><div id="col-1" class="letter-strip"></div></div>
-        <div class="column"><div id="col-2" class="letter-strip"></div></div>
-        <div class="column"><div id="col-3" class="letter-strip"></div></div>
-        <div id="cursor">_</div>
-    </div>
+  /* ── Resolución canónica ── */
+  const CW = 2560, CH = 1440;
 
-    <script>
-        const target = "CATN";
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
-        const strips = [
-            document.getElementById("col-0"),
-            document.getElementById("col-1"),
-            document.getElementById("col-2"),
-            document.getElementById("col-3")
-        ];
+  /* ── Escalar al viewport ── */
+  const scaler = document.getElementById('scaler');
+  function applyScale(){
+    const s = Math.min(window.innerWidth / CW, window.innerHeight / CH);
+    scaler.style.transform = `scale(${s})`;
+    scaler.style.left = ((window.innerWidth  - CW * s) / 2) + 'px';
+    scaler.style.top  = ((window.innerHeight - CH * s) / 2) + 'px';
+  }
+  applyScale();
+  window.addEventListener('resize', applyScale);
 
-        const rowHeight = 160;
-        const targetIndex = 10; // Un poco más de espacio arriba
-        const totalRows = 60;
+  /* ── Constantes de layout (todo en coordenadas canónicas) ── */
+  const COLS = 4;
+  const CELL = 160;   // px canónicos por celda
+  const FS   = 100;   // font-size canónico
 
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        function playBeep(freq, dur, vol = 0.05) {
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.start(); osc.stop(audioCtx.currentTime + dur);
-        }
+  const TARGET = ['C','A','T','N'];
+  const CHARS  = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?'.split('');
 
-        strips.forEach((strip, i) => {
-            let content = "";
-            for (let j = 0; j < totalRows; j++) {
-                content += `<div>${j === targetIndex ? target[i] : chars[Math.floor(Math.random() * chars.length)]}</div>`;
-            }
-            strip.innerHTML = content;
-            strip.style.transform = `translateY(-${(totalRows - 1) * rowHeight}px)`;
-        });
+  // Filas: cuántas de CELL entran en CH
+  let ROWS = Math.ceil(CH / CELL);           // 9
+  if (ROWS % 2 === 0) ROWS++;               // forzar impar → 9 ya lo es
+  const CENTER_ROW = Math.floor(ROWS / 2);  // 4
 
-        document.body.addEventListener('click', () => {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            document.getElementById('boot-msg').style.display = 'none';
-            
-            strips.forEach((strip, i) => {
-                let currentPos = (totalRows - 1);
-                const speed = 40 + (i * 25); 
+  // Grid: su esquina superior izquierda en coordenadas canónicas
+  const gridW = COLS * CELL;                // 640
+  const gridH = ROWS * CELL;               // 1440
+  const gridX = (CW - gridW) / 2;          // 960  ← centro horizontal exacto
+  const gridY = (CH - gridH) / 2;          // 0    (9×160=1440 = CH exacto)
 
-                const moveInterval = setInterval(() => {
-                    if (currentPos > targetIndex) {
-                        currentPos--;
-                        strip.style.transform = `translateY(-${currentPos * rowHeight}px)`;
-                        // Sonido lúgubre de procesamiento
-                        if (Math.random() > 0.85) playBeep(60, 0.08, 0.02);
-                    } else {
-                        clearInterval(moveInterval);
-                        playBeep(120, 0.3, 0.08); // Tono bajo al anclar
-                        if (i === 3) showCursor();
-                    }
-                }, speed);
-            });
-        });
+  // Fila central: top en coordenadas canónicas
+  const focusTop = gridY + CENTER_ROW * CELL;  // 0 + 4×160 = 640
 
-        function showCursor() {
-            const cursor = document.getElementById("cursor");
-            cursor.style.display = "block";
-            cursor.classList.add("blink");
-            playBeep(250, 0.5, 0.08);
-        }
-    </script>
+  /* ── Posicionar grid ── */
+  const grid = document.getElementById('grid');
+  grid.style.left                = gridX + 'px';
+  grid.style.top                 = gridY + 'px';
+  grid.style.width               = gridW + 'px';
+  grid.style.height              = gridH + 'px';
+  grid.style.gridTemplateColumns = `repeat(${COLS}, ${CELL}px)`;
+  grid.style.gridTemplateRows   = `repeat(${ROWS}, ${CELL}px)`;
+
+  /* ── Posicionar barra de foco ── */
+  const focusBar = document.getElementById('focus-bar');
+  focusBar.style.top    = focusTop + 'px';
+  focusBar.style.height = CELL + 'px';
+
+  /* ── Construir celdas ── */
+  function randChar(){ return CHARS[Math.floor(Math.random()*CHARS.length)]; }
+
+  const cells = [];
+  for(let c = 0; c < COLS; c++){
+    cells[c] = [];
+    for(let r = 0; r < ROWS; r++){
+      const div = document.createElement('div');
+      div.className      = 'cell c-dim';
+      div.style.width    = CELL + 'px';
+      div.style.height   = CELL + 'px';
+      div.style.fontSize = FS + 'px';
+      div.textContent    = randChar();
+      grid.appendChild(div);
+      cells[c][r] = div;
+    }
+  }
+
+  // El grid es row-major en el DOM (fills left→right, top→bottom)
+  // Para tener cells[col][row] necesitamos reordenar.
+  // Más sencillo: construir por filas y reasignar referencia.
+  // Reconstruimos correctamente:
+  grid.innerHTML = '';
+  const cellsFlat = [];
+  for(let r = 0; r < ROWS; r++){
+    for(let c = 0; c < COLS; c++){
+      const div = document.createElement('div');
+      div.className      = 'cell c-dim';
+      div.style.width    = CELL + 'px';
+      div.style.height   = CELL + 'px';
+      div.style.fontSize = FS + 'px';
+      div.textContent    = randChar();
+      grid.appendChild(div);
+      cellsFlat.push({ div, r, c });
+    }
+  }
+  // Acceso: cellAt(c,r)
+  function cellAt(c, r){ return cellsFlat[r * COLS + c].div; }
+
+  function colorClass(row, locked){
+    if(row === CENTER_ROW) return locked ? 'c-target' : 'c-hot';
+    const d = Math.abs(row - CENTER_ROW);
+    if(d === 1) return 'c-mid';
+    if(d <= 3)  return 'c-near';
+    return 'c-dim';
+  }
+
+  const state = TARGET.map((_, ci) => ({
+    offset: 0, locked: false, interval: null, ci
+  }));
+
+  function refreshCol(s){
+    for(let r = 0; r < ROWS; r++){
+      const cell = cellAt(s.ci, r);
+      cell.className = 'cell ' + colorClass(r, s.locked);
+      if(!s.locked) cell.textContent = randChar();
+    }
+  }
+
+  /* ── Audio ── */
+  let audioCtx = null;
+  function initAudio(){
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, vol, type){
+    vol  = vol  || 0.05;
+    type = type || 'sawtooth';
+    if(!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    g.gain.setValueAtTime(vol, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+
+  /* ── Animación de salida a pasos ── */
+  function startExitAnimation(promptLine){
+    let barTop     = focusTop;
+    let stageX     = 0;          // translateX del grid
+    let promptLeft = gridX + gridW + Math.round(CELL * 0.35);
+
+    const stepsNeeded = Math.ceil(focusTop / CELL) + 2;
+    let step = 0;
+
+    const ticker = setInterval(() => {
+      step++;
+
+      barTop -= CELL;
+      focusBar.style.top = barTop + 'px';
+
+      stageX -= CELL;
+      grid.style.transform = `translateX(${stageX}px)`;
+
+      promptLeft -= CELL;
+      promptLine.style.left = promptLeft + 'px';
+      promptLine.style.top  = (barTop + CELL / 2) + 'px';
+
+      const freq = Math.max(28, 70 - step * 4);
+      beep(freq, 0.12, 0.06, 'sawtooth');
+
+      if(step >= stepsNeeded) clearInterval(ticker);
+    }, 120);
+  }
+
+  /* ── Mostrar prompt ── */
+  function showPrompt(){
+    const promptLine  = document.getElementById('prompt-line');
+    const promptInput = document.getElementById('prompt-input');
+
+    const promptLeft = gridX + gridW + Math.round(CELL * 0.35);
+    const promptTop  = focusTop + CELL / 2;
+
+    promptLine.style.left      = promptLeft + 'px';
+    promptLine.style.top       = promptTop + 'px';
+    promptLine.style.transform = 'translateY(-50%)';
+    promptLine.style.display   = 'flex';
+
+    promptInput.focus();
+    promptInput.addEventListener('input', () => {
+      promptInput.style.width = Math.max(1, promptInput.value.length) + 'ch';
+    });
+    promptInput.addEventListener('keydown', () => {
+      beep(55 + Math.random() * 30, 0.06, 0.04, 'sawtooth');
+    });
+
+    setTimeout(() => startExitAnimation(promptLine), 400);
+  }
+
+  /* ── Lock ── */
+  let lockedCount = 0;
+  function lockCol(s){
+    s.locked = true;
+    clearInterval(s.interval);
+    for(let r = 0; r < ROWS; r++){
+      const cell = cellAt(s.ci, r);
+      cell.className   = 'cell ' + colorClass(r, true);
+      cell.textContent = (r === CENTER_ROW) ? TARGET[s.ci] : randChar();
+    }
+    beep(55 + s.ci * 10, 0.5, 0.07, 'sawtooth');
+    lockedCount++;
+    if(lockedCount === COLS){
+      setTimeout(() => {
+        beep(55,  0.6, 0.08, 'sawtooth');
+        setTimeout(() => beep(82,  0.5, 0.07, 'sawtooth'), 200);
+        setTimeout(() => beep(110, 0.7, 0.06, 'sawtooth'), 400);
+        setTimeout(showPrompt, 900);
+      }, 300);
+    }
+  }
+
+  /* ── Run ── */
+  function runCol(s){
+    let ticks = 0;
+    const stopAt = 60 + s.ci * 30 + Math.floor(Math.random() * 20);
+    s.interval = setInterval(() => {
+      ticks++;
+      s.offset = (s.offset + 1) % ROWS;
+      refreshCol(s);
+      if(Math.random() > 0.78) beep(30 + Math.random() * 40, 0.04, 0.012, 'sawtooth');
+      if(ticks >= stopAt) lockCol(s);
+    }, 48 + s.ci * 15);
+  }
+
+  /* ── Start on click ── */
+  let started = false;
+  document.addEventListener('click', () => {
+    if(started) return;
+    started = true;
+    initAudio();
+    document.getElementById('boot-msg').style.display = 'none';
+    state.forEach((s, i) => setTimeout(() => runCol(s), i * 130));
+  });
+
+})();
+</script>
 </body>
 </html>
