@@ -6,376 +6,248 @@
   <title>CATN - Terminal Interface</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body, html {
-      width: 100vw;
-      height: 100vh;
-      background: #000;
-      overflow: hidden;
-      font-family: 'Courier New', Courier, monospace;
-    }
-
+    body, html { width:100vw; height:100vh; background:#000; overflow:hidden; font-family:'Courier New',monospace; }
     body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent, transparent 2px,
-        rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px
-      );
-      pointer-events: none;
-      z-index: 100;
+      content:''; position:fixed; inset:0; pointer-events:none; z-index:100;
+      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px);
     }
-
     body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.88) 100%);
-      pointer-events: none;
-      z-index: 99;
+      content:''; position:fixed; inset:0; pointer-events:none; z-index:99;
+      background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.88) 100%);
     }
-
-    #scaler {
-      position: fixed;
-      top: 0; left: 0;
-      width: 2560px;
-      height: 1440px;
-      transform-origin: top left;
-    }
-
-    /* El stage es solo un contenedor de posición, sin grid centrado */
-    #stage {
-      position: absolute;
-      top: 0; left: 0;
-      width: 2560px;
-      height: 1440px;
-      z-index: 1;
-      overflow: hidden;
-    }
-
-    /* Grid interno: posicionado exactamente por JS */
-    #grid {
-      position: absolute;
-      display: grid;
-      /* cols y rows seteados por JS */
-    }
-
-    .cell {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      user-select: none;
-    }
-
-    .c-dim    { color: rgba(0,255,65,0.12); }
-    .c-near   { color: rgba(0,255,65,0.32); }
-    .c-mid    { color: rgba(0,255,65,0.60); }
-    .c-hot    { color: #00ff41; text-shadow: 0 0 8px rgba(0,255,65,0.6); }
-    .c-target { color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 6px #fff; }
-
+    #scaler { position:fixed; inset:0; overflow:hidden; display:flex; align-items:center; justify-content:center; z-index:1; }
+    #canvas { position:relative; width:2560px; height:1440px; flex-shrink:0; transform-origin:center center; overflow:hidden; }
+    #stage  { position:absolute; display:grid; }
+    .cell   { display:flex; align-items:center; justify-content:center; font-weight:700; user-select:none; }
+    .c-dim    { color:rgba(0,255,65,0.12); }
+    .c-near   { color:rgba(0,255,65,0.32); }
+    .c-mid    { color:rgba(0,255,65,0.60); }
+    .c-hot    { color:#00ff41; text-shadow:0 0 8px rgba(0,255,65,0.6); }
+    .c-target { color:#00ff41; text-shadow:0 0 20px #00ff41,0 0 6px #fff; }
     #focus-bar {
-      position: absolute;
-      left: 0;
-      width: 2560px;
-      background: rgba(0,255,65,0.06);
-      border-top:    1px solid rgba(0,255,65,0.30);
-      border-bottom: 1px solid rgba(0,255,65,0.30);
-      z-index: 2;
-      pointer-events: none;
+      position:absolute; left:0; width:100%; pointer-events:none; z-index:2;
+      background:rgba(0,255,65,0.06);
+      border-top:1px solid rgba(0,255,65,0.30); border-bottom:1px solid rgba(0,255,65,0.30);
     }
-
     #boot-msg {
-      position: absolute;
-      bottom: 60px;
-      width: 2560px;
-      text-align: center;
-      color: rgba(0,255,65,0.65);
-      font-size: 28px;
-      letter-spacing: 0.22em;
-      z-index: 200;
-      animation: blink 1.3s step-end infinite;
+      position:absolute; bottom:60px; width:100%; text-align:center;
+      color:rgba(0,255,65,0.65); font-size:28px; letter-spacing:0.22em; z-index:200;
+      animation:blink 1.3s step-end infinite;
     }
-
     #prompt-line {
-      position: absolute;
-      display: none;
-      align-items: center;
-      z-index: 200;
-      font-size: 100px;
-      color: rgba(0,255,65,0.85);
-      white-space: nowrap;
+      position:absolute; display:none; align-items:center; z-index:200;
+      font-size:100px; color:rgba(0,255,65,0.85); white-space:nowrap;
+      max-width:2400px; overflow:hidden;
     }
-    #prompt-prefix { color: rgba(0,255,65,0.55); margin-right: 0.3em; }
+    #prompt-prefix { color:rgba(0,255,65,0.55); margin-right:0.2em; flex-shrink:0; }
+    #prompt-text   {
+      color:rgba(0,255,65,0.85); font-family:'Courier New',monospace;
+      font-size:inherit; letter-spacing:0.05em;
+      overflow:hidden; white-space:nowrap;
+      direction:ltr; text-align:left;
+      min-width:0;
+    }
     #prompt-input {
-      background: transparent;
-      border: none; outline: none;
-      color: rgba(0,255,65,0.85);
-      font-family: 'Courier New', monospace;
-      font-size: inherit;
-      caret-color: transparent;
-      letter-spacing: 0.08em;
-      min-width: 1px; width: 1px;
+      position:absolute; opacity:0; pointer-events:none;
+      width:1px; height:1px; left:-9999px;
     }
     #prompt-cursor {
-      display: inline-block;
-      width: 0.55em; height: 0.85em;
-      background: #00ff41;
-      margin-left: 4px;
-      vertical-align: middle;
-      animation: blink 1s step-end infinite;
+      display:inline-block; width:0.55em; height:0.82em; background:#00ff41;
+      margin-left:2px; vertical-align:middle; animation:blink 1s step-end infinite;
+      flex-shrink:0;
     }
-
+    #cmd-output {
+      position:absolute; z-index:200; display:none;
+      font-size:52px; color:rgba(0,255,65,0.75);
+      font-family:'Courier New',monospace; letter-spacing:0.04em;
+      line-height:1.55; white-space:pre;
+    }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
   </style>
 </head>
 <body>
 <div id="scaler">
-  <div id="stage">
-    <div id="grid"></div>
-  </div>
-  <div id="focus-bar"></div>
-  <div id="boot-msg">[ HAGA CLIC PARA INICIAR SECUENCIA ]</div>
-  <div id="prompt-line">
-    <span id="prompt-prefix">:\&gt;&nbsp;</span>
+  <div id="canvas">
+    <div id="focus-bar"></div>
+    <div id="stage"></div>
+    <div id="boot-msg">[ HAGA CLIC PARA INICIAR SECUENCIA ]</div>
+    <div id="prompt-line">
+      <span id="prompt-prefix">:\&gt;&nbsp;</span>
+      <span id="prompt-text"></span>
+      <span id="prompt-cursor"></span>
+    </div>
     <input id="prompt-input" type="text" autocomplete="off" spellcheck="false"/>
-    <span id="prompt-cursor"></span>
+    <div id="cmd-output"></div>
   </div>
 </div>
 
 <script>
 (function(){
+  const CW=2560, CH=1440, CELL=160, FS=100, COLS=4;
+  const TARGET=['C','A','T','N'];
+  const CHARS='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?'.split('');
 
-  /* ── Resolución canónica ── */
-  const CW = 2560, CH = 1440;
+  const canvas=document.getElementById('canvas');
+  function applyScale(){ const s=Math.min(window.innerWidth/CW,window.innerHeight/CH); canvas.style.transform='scale('+s+')'; }
+  applyScale(); window.addEventListener('resize',applyScale);
 
-  /* ── Escalar al viewport ── */
-  const scaler = document.getElementById('scaler');
-  function applyScale(){
-    const s = Math.min(window.innerWidth / CW, window.innerHeight / CH);
-    scaler.style.transform = `scale(${s})`;
-    scaler.style.left = ((window.innerWidth  - CW * s) / 2) + 'px';
-    scaler.style.top  = ((window.innerHeight - CH * s) / 2) + 'px';
-  }
-  applyScale();
-  window.addEventListener('resize', applyScale);
+  const CR=4, ROWS=18, GW=COLS*CELL;
+  const SL0=(CW-GW)/2, ST0=0, FT0=CR*CELL;
 
-  /* ── Constantes de layout (todo en coordenadas canónicas) ── */
-  const COLS = 4;
-  const CELL = 160;   // px canónicos por celda
-  const FS   = 100;   // font-size canónico
+  const focusBar=document.getElementById('focus-bar');
+  focusBar.style.top=FT0+'px'; focusBar.style.height=CELL+'px';
 
-  const TARGET = ['C','A','T','N'];
-  const CHARS  = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?'.split('');
+  const stage=document.getElementById('stage');
+  stage.style.gridTemplateColumns='repeat('+COLS+','+CELL+'px)';
+  stage.style.gridTemplateRows   ='repeat('+ROWS+','+CELL+'px)';
+  stage.style.width=GW+'px'; stage.style.height=(ROWS*CELL)+'px';
+  stage.style.left=SL0+'px'; stage.style.top=ST0+'px';
 
-  // Filas: cuántas de CELL entran en CH
-  let ROWS = Math.ceil(CH / CELL);           // 9
-  if (ROWS % 2 === 0) ROWS++;               // forzar impar → 9 ya lo es
-  const CENTER_ROW = Math.floor(ROWS / 2);  // 4
-
-  // Grid: su esquina superior izquierda en coordenadas canónicas
-  const gridW = COLS * CELL;                // 640
-  const gridH = ROWS * CELL;               // 1440
-  const gridX = (CW - gridW) / 2;          // 960  ← centro horizontal exacto
-  const gridY = (CH - gridH) / 2;          // 0    (9×160=1440 = CH exacto)
-
-  // Fila central: top en coordenadas canónicas
-  const focusTop = gridY + CENTER_ROW * CELL;  // 0 + 4×160 = 640
-
-  /* ── Posicionar grid ── */
-  const grid = document.getElementById('grid');
-  grid.style.left                = gridX + 'px';
-  grid.style.top                 = gridY + 'px';
-  grid.style.width               = gridW + 'px';
-  grid.style.height              = gridH + 'px';
-  grid.style.gridTemplateColumns = `repeat(${COLS}, ${CELL}px)`;
-  grid.style.gridTemplateRows   = `repeat(${ROWS}, ${CELL}px)`;
-
-  /* ── Posicionar barra de foco ── */
-  const focusBar = document.getElementById('focus-bar');
-  focusBar.style.top    = focusTop + 'px';
-  focusBar.style.height = CELL + 'px';
-
-  /* ── Construir celdas ── */
-  function randChar(){ return CHARS[Math.floor(Math.random()*CHARS.length)]; }
-
-  const cells = [];
-  for(let c = 0; c < COLS; c++){
-    cells[c] = [];
-    for(let r = 0; r < ROWS; r++){
-      const div = document.createElement('div');
-      div.className      = 'cell c-dim';
-      div.style.width    = CELL + 'px';
-      div.style.height   = CELL + 'px';
-      div.style.fontSize = FS + 'px';
-      div.textContent    = randChar();
-      grid.appendChild(div);
-      cells[c][r] = div;
+  const cells=[];
+  for(let c=0;c<COLS;c++){
+    cells[c]=[];
+    for(let r=0;r<ROWS;r++){
+      const d=document.createElement('div');
+      d.className='cell c-dim';
+      d.style.width=CELL+'px'; d.style.height=CELL+'px'; d.style.fontSize=FS+'px';
+      d.style.gridColumn=(c+1)+''; d.style.gridRow=(r+1)+'';
+      d.textContent=rnd(); stage.appendChild(d); cells[c][r]=d;
     }
   }
-
-  // El grid es row-major en el DOM (fills left→right, top→bottom)
-  // Para tener cells[col][row] necesitamos reordenar.
-  // Más sencillo: construir por filas y reasignar referencia.
-  // Reconstruimos correctamente:
-  grid.innerHTML = '';
-  const cellsFlat = [];
-  for(let r = 0; r < ROWS; r++){
-    for(let c = 0; c < COLS; c++){
-      const div = document.createElement('div');
-      div.className      = 'cell c-dim';
-      div.style.width    = CELL + 'px';
-      div.style.height   = CELL + 'px';
-      div.style.fontSize = FS + 'px';
-      div.textContent    = randChar();
-      grid.appendChild(div);
-      cellsFlat.push({ div, r, c });
-    }
-  }
-  // Acceso: cellAt(c,r)
-  function cellAt(c, r){ return cellsFlat[r * COLS + c].div; }
-
-  function colorClass(row, locked){
-    if(row === CENTER_ROW) return locked ? 'c-target' : 'c-hot';
-    const d = Math.abs(row - CENTER_ROW);
-    if(d === 1) return 'c-mid';
-    if(d <= 3)  return 'c-near';
-    return 'c-dim';
+  function rnd(){ return CHARS[Math.floor(Math.random()*CHARS.length)]; }
+  function cls(r,locked){
+    if(r===CR) return locked?'c-target':'c-hot';
+    const d=Math.abs(r-CR); if(d===1) return 'c-mid'; if(d<=3) return 'c-near'; return 'c-dim';
   }
 
-  const state = TARGET.map((_, ci) => ({
-    offset: 0, locked: false, interval: null, ci
-  }));
-
+  const state=TARGET.map((_,ci)=>({offset:0,locked:false,interval:null,ci}));
   function refreshCol(s){
-    for(let r = 0; r < ROWS; r++){
-      const cell = cellAt(s.ci, r);
-      cell.className = 'cell ' + colorClass(r, s.locked);
-      if(!s.locked) cell.textContent = randChar();
+    for(let r=0;r<ROWS;r++){
+      cells[s.ci][r].className='cell '+cls(r,s.locked);
+      if(!s.locked) cells[s.ci][r].textContent=rnd();
     }
   }
 
-  /* ── Audio ── */
-  let audioCtx = null;
-  function initAudio(){
-    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if(audioCtx.state === 'suspended') audioCtx.resume();
-  }
-  function beep(freq, dur, vol, type){
-    vol  = vol  || 0.05;
-    type = type || 'sawtooth';
-    if(!audioCtx) return;
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    g.gain.setValueAtTime(vol, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-    o.connect(g); g.connect(audioCtx.destination);
-    o.start(); o.stop(audioCtx.currentTime + dur);
+  let ac=null;
+  function initAudio(){ if(!ac) ac=new(window.AudioContext||window.webkitAudioContext)(); if(ac.state==='suspended') ac.resume(); }
+  function beep(freq,dur,vol,type){
+    if(!ac) return; vol=vol||0.05; type=type||'sawtooth';
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.type=type; o.frequency.setValueAtTime(freq,ac.currentTime);
+    g.gain.setValueAtTime(vol,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
   }
 
-  /* ── Animación de salida a pasos ── */
-  function startExitAnimation(promptLine){
-    let barTop     = focusTop;
-    let stageX     = 0;          // translateX del grid
-    let promptLeft = gridX + gridW + Math.round(CELL * 0.35);
+  /* ── COMANDOS ACTUALIZADOS ── */
+  const COMMANDS = {
+    help: () => [
+      '┌────────────────── :: CATN HELP :: ──────────────────┐',
+      '│ help       │ Muestra esta lista de ayuda            │',
+      '│ about      │ Información del proyecto CATN          │',
+      '│ status     │ Estado vital del sistema y red         │',
+      '│ scan       │ Escaneo de nodos de red Neuraleon      │',
+      '│ logs       │ Accede a fragmentos de memoria         │',
+      '│ time       │ Muestra la hora y fecha del sistema    │',
+      '│ echo <txt> │ Replica el texto ingresado             │',
+      '│ clear      │ Limpia la pantalla de la terminal      │',
+      '│ exit       │ Termina la sesión actual               │',
+      '└─────────────────────────────────────────────────────┘'
+    ],
+    about: () => [
+      '  CATN — Cobra: Against the Neuralypsis',
+      '  Proyecto de ciencia ficción bajo control tecnocrático.',
+      '  [ESTADO: PROTOTIPO ACTIVO]'
+    ],
+    status: () => [
+      '  Reactor: ESTABLE | Red Neuraleon: DETECTADA',
+      '  Axioma: MONITOREANDO | Cobra: SIN SEÑAL'
+    ],
+    scan: () => [
+      '  Escaneando red Neuraleon...',
+      '  [OK] Nodo Central - 127.0.0.1',
+      '  [??] Entrada Cifrada - 192.168.0.42',
+      '  [!!] Intrusión detectada en subnivel 4.'
+    ],
+    logs: () => [
+      '  [LOG_01]: Interferencia detectada en el sector 7.',
+      '  [LOG_02]: Los servidores de Axioma no responden.',
+      '  [LOG_03]: Confirmado: El núcleo de Cobra ha despertado.'
+    ],
+    time: () => [
+      '  FECHA: ' + new Date().toLocaleDateString(),
+      '  HORA : ' + new Date().toLocaleTimeString()
+    ],
+    echo: (args) => [ '  > ' + (args || 'Nada que repetir.') ],
+    clear: () => '__CLEAR__',
+    exit: () => [ '  TERMINANDO SESIÓN...', '  CONEXIÓN CERRADA. ADIÓS.' ],
+    whoami: () => [ '  USUARIO NO IDENTIFICADO. ACCESO PROVISIONAL.' ]
+  };
 
-    const stepsNeeded = Math.ceil(focusTop / CELL) + 2;
-    let step = 0;
+  const bootMsg=document.getElementById('boot-msg');
+  const promptLine=document.getElementById('prompt-line');
+  const promptInput=document.getElementById('prompt-input');
+  const promptText=document.getElementById('prompt-text');
+  const cmdOutput=document.getElementById('cmd-output');
 
-    const ticker = setInterval(() => {
-      step++;
-
-      barTop -= CELL;
-      focusBar.style.top = barTop + 'px';
-
-      stageX -= CELL;
-      grid.style.transform = `translateX(${stageX}px)`;
-
-      promptLeft -= CELL;
-      promptLine.style.left = promptLeft + 'px';
-      promptLine.style.top  = (barTop + CELL / 2) + 'px';
-
-      const freq = Math.max(28, 70 - step * 4);
-      beep(freq, 0.12, 0.06, 'sawtooth');
-
-      if(step >= stepsNeeded) clearInterval(ticker);
-    }, 120);
-  }
-
-  /* ── Mostrar prompt ── */
-  function showPrompt(){
-    const promptLine  = document.getElementById('prompt-line');
-    const promptInput = document.getElementById('prompt-input');
-
-    const promptLeft = gridX + gridW + Math.round(CELL * 0.35);
-    const promptTop  = focusTop + CELL / 2;
-
-    promptLine.style.left      = promptLeft + 'px';
-    promptLine.style.top       = promptTop + 'px';
-    promptLine.style.transform = 'translateY(-50%)';
-    promptLine.style.display   = 'flex';
-
-    promptInput.focus();
-    promptInput.addEventListener('input', () => {
-      promptInput.style.width = Math.max(1, promptInput.value.length) + 'ch';
+  let active=false;
+  window.addEventListener('click',()=>{
+    if(active) return; active=true;
+    initAudio(); bootMsg.style.display='none';
+    state.forEach(s=>{
+      s.interval=setInterval(()=>{ refreshCol(s); if(Math.random()<0.03) beep(200+Math.random()*400,0.05,0.02); },100);
     });
-    promptInput.addEventListener('keydown', () => {
-      beep(55 + Math.random() * 30, 0.06, 0.04, 'sawtooth');
-    });
-
-    setTimeout(() => startExitAnimation(promptLine), 400);
-  }
-
-  /* ── Lock ── */
-  let lockedCount = 0;
-  function lockCol(s){
-    s.locked = true;
-    clearInterval(s.interval);
-    for(let r = 0; r < ROWS; r++){
-      const cell = cellAt(s.ci, r);
-      cell.className   = 'cell ' + colorClass(r, true);
-      cell.textContent = (r === CENTER_ROW) ? TARGET[s.ci] : randChar();
-    }
-    beep(55 + s.ci * 10, 0.5, 0.07, 'sawtooth');
-    lockedCount++;
-    if(lockedCount === COLS){
-      setTimeout(() => {
-        beep(55,  0.6, 0.08, 'sawtooth');
-        setTimeout(() => beep(82,  0.5, 0.07, 'sawtooth'), 200);
-        setTimeout(() => beep(110, 0.7, 0.06, 'sawtooth'), 400);
-        setTimeout(showPrompt, 900);
-      }, 300);
-    }
-  }
-
-  /* ── Run ── */
-  function runCol(s){
-    let ticks = 0;
-    const stopAt = 60 + s.ci * 30 + Math.floor(Math.random() * 20);
-    s.interval = setInterval(() => {
-      ticks++;
-      s.offset = (s.offset + 1) % ROWS;
-      refreshCol(s);
-      if(Math.random() > 0.78) beep(30 + Math.random() * 40, 0.04, 0.012, 'sawtooth');
-      if(ticks >= stopAt) lockCol(s);
-    }, 48 + s.ci * 15);
-  }
-
-  /* ── Start on click ── */
-  let started = false;
-  document.addEventListener('click', () => {
-    if(started) return;
-    started = true;
-    initAudio();
-    document.getElementById('boot-msg').style.display = 'none';
-    state.forEach((s, i) => setTimeout(() => runCol(s), i * 130));
+    setTimeout(()=>unlock(0),1000);
   });
 
-})();
-</script>
-</body>
-</html>
+  function unlock(idx){
+    if(idx>=COLS){
+      setTimeout(showTerminal,800);
+      return;
+    }
+    state[idx].locked=true;
+    clearInterval(state[idx].interval);
+    refreshCol(state[idx]);
+    beep(800,0.2,0.1,'sine');
+    setTimeout(()=>unlock(idx+1),500);
+  }
+
+  function showTerminal(){
+    promptLine.style.display='flex';
+    promptLine.style.left=SL0+'px';
+    promptLine.style.top=(FT0+CELL+40)+'px';
+    cmdOutput.style.display='block';
+    cmdOutput.style.left=SL0+'px';
+    cmdOutput.style.top=(FT0+CELL+200)+'px';
+    promptInput.focus();
+  }
+
+  window.addEventListener('keydown',()=>{ if(active) promptInput.focus(); });
+
+  promptInput.addEventListener('input',()=>{ promptText.textContent=promptInput.value; });
+
+  promptInput.addEventListener('keydown',(e)=>{
+    if(e.key==='Enter'){
+      const val=promptInput.value;
+      promptInput.value=''; promptText.textContent='';
+      if(val.trim()){
+        beep(400,0.1,0.05);
+        handleCommand(val);
+      }
+    }
+  });
+
+  function handleCommand(rawCmd){
+    const parts = rawCmd.trim().split(' ');
+    const cmdKey = parts[0].toLowerCase();
+    const args = parts.slice(1).join(' ');
+    
+    const fn = COMMANDS[cmdKey];
+    if(fn){
+      const res = fn(args);
+      if(res==='__CLEAR__'){
+        cmdOutput.textContent='';
+      } else {
+        cmdOutput.textContent = res.join('\n') + '\n\n' + cmdOutput.textContent;
+      }
+    } else {
