@@ -954,6 +954,137 @@ function deniedSound(){
   noiseBurst(0.18,0.045);
 }
 
+
+/* ========================================================= */
+/* VOICE SYSTEM — Speech API + Web Audio effects             */
+/* ========================================================= */
+
+const VOICE = {
+
+  /* Cancelar voz en curso */
+  cancel(){ window.speechSynthesis.cancel(); },
+
+  /* speak(text, profile)
+     Profiles:
+       'system'  → voz fría NSP, drone bajo
+       'cobra'   → señal fragmentada, glitcheo
+       'axioma'  → entidad no-humana, distorsión máxima
+  */
+  speak(text, profile){
+
+    if(!window.speechSynthesis) return;
+
+    this.cancel();
+
+    const utter = new SpeechSynthesisUtterance(text);
+
+    /* Seleccionar la voz más robótica disponible */
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v=>
+      v.lang.startsWith('es') && v.name.toLowerCase().includes('male')
+    ) || voices.find(v=>
+      v.lang.startsWith('es')
+    ) || voices[0];
+
+    if(preferred) utter.voice = preferred;
+
+    if(profile === 'cobra'){
+
+      utter.rate  = 0.72;
+      utter.pitch = 0.45;
+      utter.volume = 0.88;
+
+      /* Efectos Web Audio durante la voz */
+      noiseBurst(0.18, 0.022);
+      sweep(320, 38, 0.6, 0.028, 'sawtooth');
+
+      /* Glitches aleatorios mientras habla */
+      utter.onstart = () => {
+        this._cobraInterval = setInterval(()=>{
+          if(Math.random() > 0.6){
+            noiseBurst(0.06 + Math.random()*0.08, 0.008 + Math.random()*0.015);
+          }
+          if(Math.random() > 0.82){
+            beep(28 + Math.random()*30, 0.05, 0.018, 'sawtooth');
+          }
+        }, 380);
+        pulseAtmosphere('bloom');
+      };
+
+      utter.onend = () => {
+        clearInterval(this._cobraInterval);
+      };
+
+    } else if(profile === 'axioma'){
+
+      utter.rate   = 0.58;
+      utter.pitch  = 0.22;
+      utter.volume = 0.92;
+
+      utter.onstart = () => {
+        burstGlitch();
+        pulseAtmosphere('warning');
+        sweep(260, 28, 1.1, 0.038, 'sawtooth');
+        this._axiomaInterval = setInterval(()=>{
+          if(Math.random() > 0.5){
+            beep(22 + Math.random()*20, 0.08, 0.022, 'sawtooth');
+          }
+          if(Math.random() > 0.75){
+            noiseBurst(0.05, 0.012);
+          }
+        }, 280);
+      };
+
+      utter.onend = () => {
+        clearInterval(this._axiomaInterval);
+        beep(18, 0.4, 0.028, 'sine');
+      };
+
+    } else {
+
+      /* 'system' — voz fría, institucional */
+      utter.rate   = 0.82;
+      utter.pitch  = 0.62;
+      utter.volume = 0.80;
+
+      utter.onstart = () => {
+        ambientBreath(1.4, 0.010);
+        if(droneGain){
+          droneGain.gain.cancelScheduledValues(ac.currentTime);
+          droneGain.gain.setTargetAtTime(0.018, ac.currentTime, 0.4);
+          droneGain.gain.setTargetAtTime(0.00001, ac.currentTime + 1.8, 0.6);
+        }
+      };
+    }
+
+    /* Esperar a que las voces estén cargadas */
+    if(window.speechSynthesis.getVoices().length === 0){
+      window.speechSynthesis.addEventListener('voiceschanged', ()=>{
+        window.speechSynthesis.speak(utter);
+      }, { once: true });
+    } else {
+      window.speechSynthesis.speak(utter);
+    }
+  }
+
+};
+
+/* Mapa de comandos → perfil de voz
+   El texto se extrae automáticamente del output real del comando */
+const VOICE_MAP = {
+  status     : 'system',
+  whoami     : 'system',
+  about      : 'system',
+  nsp        : 'system',
+  neuraleon  : 'system',
+  ping       : 'system',
+  cobra      : 'cobra',
+  petrov     : 'cobra',
+  atacama    : 'cobra',
+  axioma     : 'axioma',
+  neuralypsis: 'axioma',
+};
+
 /* ========================================================= */
 /* STATE */
 /* ========================================================= */
@@ -1563,7 +1694,11 @@ const COMMANDS = {
 '  next      pagina siguiente',
 '  prev      pagina anterior',
 '  unlock    elevar credencial',
-'  clear     limpiar consola'
+'  clear     limpiar consola',
+'',
+'VOZ',
+'  voice     estado y perfiles de voz',
+'  mute      silenciar voz'
 
   ],
 
@@ -1782,6 +1917,32 @@ sonarPulse(),
 'ADVERTENCIA:',
 'observar tambien modifica el experimento.'
 
+  ],
+
+  mute:()=>{
+    VOICE.cancel();
+    window.speechSynthesis.cancel();
+    return [
+      'VOZ DESACTIVADA',
+      '',
+      'Escribe  voice  para reactivar.'
+    ];
+  },
+
+  voice:()=>[
+    'VOZ ACTIVA',
+    '',
+    'Perfiles disponibles:',
+    '  system  — NSP institucional',
+    '  cobra   — señal fragmentada',
+    '  axioma  — entidad no humana',
+    '',
+    'Se activa automaticamente con:',
+    '  about / status / whoami / nsp / neuraleon',
+    '  cobra / petrov / atacama',
+    '  axioma / neuralypsis',
+    '',
+    'Escribe  mute  para silenciar.'
   ],
 
   scale:(args)=>{
@@ -2486,7 +2647,32 @@ function runCommand(cmd){
 
   sensoryEvent('command');
 
-  return fn(args,cmd);
+  const result = fn(args,cmd);
+
+  /* Voz: leer las líneas reales que se van a imprimir */
+  if(VOICE_MAP[base] && ac && window.speechSynthesis){
+    const profile = VOICE_MAP[base];  /* string: 'system' | 'cobra' | 'axioma' */
+
+    /* Extraer texto legible de las líneas del resultado */
+    const lines = Array.isArray(result) ? result : [];
+    const readable = lines
+      .filter(l => typeof l === 'string' && l.trim().length > 0)
+      /* quitar líneas puramente decorativas (solo símbolos/guiones) */
+      .filter(l => /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/.test(l))
+      /* quitar etiquetas tipo "KEY :: VALUE" cortas — leer todo */
+      .join('. ')
+      /* limpiar caracteres que confunden al sintetizador */
+      .replace(/::/g, ',')
+      .replace(/[|\/#@~^*+%&!?<>{}[\]]/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    if(readable.length > 0){
+      VOICE.speak(readable, profile);
+    }
+  }
+
+  return result;
 }
 
 /* ========================================================= */
