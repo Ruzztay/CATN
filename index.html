@@ -1,310 +1,1034 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CATN - Terminal Interface</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body, html { width:100vw; height:100vh; background:#000; overflow:hidden; font-family:'Courier New',monospace; }
-    body::before {
-      content:''; position:fixed; inset:0; pointer-events:none; z-index:100;
-      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px);
-    }
-    body::after {
-      content:''; position:fixed; inset:0; pointer-events:none; z-index:99;
-      background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.88) 100%);
-    }
-    #scaler { position:fixed; inset:0; overflow:hidden; display:flex; align-items:center; justify-content:center; z-index:1; }
-    #canvas { position:relative; width:2560px; height:1440px; flex-shrink:0; transform-origin:center center; overflow:hidden; }
-    #stage  { position:absolute; display:grid; }
-    .cell   { display:flex; align-items:center; justify-content:center; font-weight:700; user-select:none; }
-    .c-dim    { color:rgba(0,255,65,0.12); }
-    .c-near   { color:rgba(0,255,65,0.32); }
-    .c-mid    { color:rgba(0,255,65,0.60); }
-    .c-hot    { color:#00ff41; text-shadow:0 0 8px rgba(0,255,65,0.6); }
-    .c-target { color:#00ff41; text-shadow:0 0 20px #00ff41,0 0 6px #fff; }
-    #focus-bar {
-      position:absolute; left:0; width:100%; pointer-events:none; z-index:2;
-      background:rgba(0,255,65,0.06);
-      border-top:1px solid rgba(0,255,65,0.30); border-bottom:1px solid rgba(0,255,65,0.30);
-    }
-    #boot-msg {
-      position:absolute; bottom:60px; width:100%; text-align:center;
-      color:rgba(0,255,65,0.65); font-size:28px; letter-spacing:0.22em; z-index:200;
-      animation:blink 1.3s step-end infinite;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CATN :: NSP TERMINAL</title>
 
-    /* ── Prompt line ── */
-    #prompt-line {
-      position:absolute; display:none; align-items:center; z-index:200;
-      font-size:100px; color:rgba(0,255,65,0.85); white-space:nowrap;
-      /* ancho máximo hasta el borde del canvas para no desbordar */
-      max-width:2400px; overflow:hidden;
-    }
-    #prompt-prefix { color:rgba(0,255,65,0.55); margin-right:0.2em; flex-shrink:0; }
-    #prompt-text   {
-      /* texto visible; crece hacia la derecha y se recorta */
-      color:rgba(0,255,65,0.85); font-family:'Courier New',monospace;
-      font-size:inherit; letter-spacing:0.05em;
-      overflow:hidden; white-space:nowrap;
-      /* mostrar siempre el extremo derecho (donde se escribe) */
-      direction:ltr; text-align:left;
-      min-width:0;
-    }
-    #prompt-input {
-      /* input real invisible; captura el teclado */
-      position:absolute; opacity:0; pointer-events:none;
-      width:1px; height:1px; left:-9999px;
-    }
-    #prompt-cursor {
-      display:inline-block; width:0.55em; height:0.82em; background:#00ff41;
-      margin-left:2px; vertical-align:middle; animation:blink 1s step-end infinite;
-      flex-shrink:0;
-    }
+<style>
 
-    /* ── Área de output de comandos ── */
-    #cmd-output {
-      position:absolute; z-index:200; display:none;
-      font-size:52px; color:rgba(0,255,65,0.75);
-      font-family:'Courier New',monospace; letter-spacing:0.04em;
-      line-height:1.55; white-space:pre;
-    }
+*, *::before, *::after{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+}
 
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-  </style>
+html, body{
+  width:100vw;
+  height:100vh;
+  overflow:hidden;
+  background:#000;
+  font-family:'Courier New', monospace;
+
+  animation:crtFlicker 0.08s infinite;
+}
+
+/* CRT scanlines */
+body::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:100;
+
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 2px,
+      rgba(0,0,0,0.18) 4px
+    );
+
+  opacity:0.55;
+  mix-blend-mode:screen;
+}
+
+/* vignette */
+body::after{
+  content:'';
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:99;
+
+  background:
+    radial-gradient(
+      ellipse at center,
+      transparent 42%,
+      rgba(0,0,0,0.94) 100%
+    );
+}
+
+/* animated noise */
+#noise{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:101;
+
+  opacity:0.035;
+
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,0.12) 1px, transparent 1px);
+
+  background-size:3px 3px;
+
+  animation:noiseShift 0.18s infinite;
+}
+
+@keyframes noiseShift{
+  0%{ transform:translate(0,0); }
+  25%{ transform:translate(-1%,1%); }
+  50%{ transform:translate(1%,-1%); }
+  75%{ transform:translate(0.5%,1%); }
+  100%{ transform:translate(0,0); }
+}
+
+@keyframes crtFlicker{
+  0%{ opacity:0.985; }
+  50%{ opacity:1; }
+  100%{ opacity:0.992; }
+}
+
+@keyframes blink{
+  0%,100%{ opacity:1; }
+  50%{ opacity:0; }
+}
+
+#scaler{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+#canvas{
+  position:relative;
+  width:2560px;
+  height:1440px;
+  overflow:hidden;
+
+  transform-origin:center center;
+}
+
+#stage{
+  position:absolute;
+  display:grid;
+}
+
+.cell{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-weight:700;
+  user-select:none;
+}
+
+.c-dim{
+  color:rgba(0,255,65,0.10);
+}
+
+.c-near{
+  color:rgba(0,255,65,0.28);
+}
+
+.c-mid{
+  color:rgba(0,255,65,0.62);
+}
+
+.c-hot{
+  color:#00ff41;
+  text-shadow:
+    0 0 8px rgba(0,255,65,0.6);
+
+  animation:flick 0.12s infinite alternate;
+}
+
+.c-target{
+  color:#00ff41;
+
+  text-shadow:
+    0 0 25px #00ff41,
+    0 0 6px #fff;
+
+  animation:flick 0.08s infinite alternate;
+}
+
+@keyframes flick{
+  from{ opacity:0.92; }
+  to{ opacity:1; }
+}
+
+#focus-bar{
+  position:absolute;
+  left:0;
+  width:100%;
+
+  background:rgba(0,255,65,0.05);
+
+  border-top:1px solid rgba(0,255,65,0.35);
+  border-bottom:1px solid rgba(0,255,65,0.35);
+
+  z-index:2;
+}
+
+#boot-msg{
+  position:absolute;
+  bottom:60px;
+  width:100%;
+
+  text-align:center;
+
+  color:rgba(0,255,65,0.65);
+
+  font-size:28px;
+  letter-spacing:0.22em;
+
+  animation:blink 1.3s step-end infinite;
+
+  z-index:200;
+}
+
+#prompt-line{
+  position:absolute;
+
+  display:none;
+  align-items:center;
+
+  white-space:nowrap;
+
+  z-index:200;
+
+  font-size:78px;
+}
+
+#prompt-prefix{
+  color:#00ff41;
+
+  margin-right:0.4em;
+
+  text-shadow:
+    0 0 12px rgba(0,255,65,0.5);
+}
+
+#prompt-text{
+  color:rgba(0,255,65,0.85);
+
+  letter-spacing:0.05em;
+
+  white-space:nowrap;
+}
+
+#prompt-cursor{
+  display:inline-block;
+
+  width:0.55em;
+  height:0.82em;
+
+  margin-left:4px;
+
+  background:#00ff41;
+
+  animation:blink 1s step-end infinite;
+}
+
+#prompt-input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+
+#cmd-output{
+  position:absolute;
+
+  display:none;
+
+  white-space:pre-wrap;
+
+  color:rgba(0,255,65,0.78);
+
+  font-size:48px;
+  line-height:1.55;
+  letter-spacing:0.04em;
+
+  z-index:200;
+}
+
+#ghost-log{
+  position:absolute;
+
+  top:80px;
+  right:120px;
+
+  font-size:30px;
+
+  color:#00ff41;
+
+  opacity:0;
+
+  z-index:500;
+
+  transition:opacity 0.4s;
+}
+
+</style>
 </head>
+
 <body>
+
+<div id="noise"></div>
+
 <div id="scaler">
+
   <div id="canvas">
+
     <div id="focus-bar"></div>
+
     <div id="stage"></div>
-    <div id="boot-msg">[ HAGA CLIC PARA INICIAR SECUENCIA ]</div>
+
+    <div id="boot-msg">
+      [ CLICK PARA INICIAR SECUENCIA ]
+    </div>
+
     <div id="prompt-line">
-      <span id="prompt-prefix">:\&gt;&nbsp;</span>
+      <span id="prompt-prefix">
+        NSP_CHILE://ROOT&gt;
+      </span>
+
       <span id="prompt-text"></span>
+
       <span id="prompt-cursor"></span>
     </div>
-    <input id="prompt-input" type="text" autocomplete="off" spellcheck="false"/>
+
+    <input
+      id="prompt-input"
+      type="text"
+      autocomplete="off"
+      spellcheck="false"
+    />
+
     <div id="cmd-output"></div>
+
+    <div id="ghost-log"></div>
+
   </div>
+
 </div>
 
 <script>
+
 (function(){
-  const CW=2560, CH=1440, CELL=160, FS=100, COLS=4;
-  const TARGET=['C','A','T','N'];
-  const CHARS='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?'.split('');
 
-  const canvas=document.getElementById('canvas');
-  function applyScale(){ const s=Math.min(window.innerWidth/CW,window.innerHeight/CH); canvas.style.transform='scale('+s+')'; }
-  applyScale(); window.addEventListener('resize',applyScale);
+/* ========================================================= */
+/* CONFIG */
+/* ========================================================= */
 
-  const CR=4, ROWS=18, GW=COLS*CELL;
-  const SL0=(CW-GW)/2, ST0=0, FT0=CR*CELL;
+const CW=2560;
+const CH=1440;
 
-  const focusBar=document.getElementById('focus-bar');
-  focusBar.style.top=FT0+'px'; focusBar.style.height=CELL+'px';
+const CELL=160;
+const FS=100;
 
-  const stage=document.getElementById('stage');
-  stage.style.gridTemplateColumns='repeat('+COLS+','+CELL+'px)';
-  stage.style.gridTemplateRows   ='repeat('+ROWS+','+CELL+'px)';
-  stage.style.width=GW+'px'; stage.style.height=(ROWS*CELL)+'px';
-  stage.style.left=SL0+'px'; stage.style.top=ST0+'px';
+const COLS=4;
+const ROWS=18;
 
-  const cells=[];
-  for(let c=0;c<COLS;c++){
-    cells[c]=[];
-    for(let r=0;r<ROWS;r++){
-      const d=document.createElement('div');
-      d.className='cell c-dim';
-      d.style.width=CELL+'px'; d.style.height=CELL+'px'; d.style.fontSize=FS+'px';
-      d.style.gridColumn=(c+1)+''; d.style.gridRow=(r+1)+'';
-      d.textContent=rnd(); stage.appendChild(d); cells[c][r]=d;
+const TARGET=['C','A','T','N'];
+
+const CHARS=
+'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?'.split('');
+
+const CR=4;
+
+const GW=COLS*CELL;
+
+const SL0=(CW-GW)/2;
+const ST0=0;
+const FT0=CR*CELL;
+
+/* ========================================================= */
+/* SYSTEM */
+/* ========================================================= */
+
+const SYSTEM = {
+
+  clearance : 1,
+  user      : 'guest',
+  connected : true,
+  axioma    : false,
+
+};
+
+/* ========================================================= */
+/* ELEMENTS */
+/* ========================================================= */
+
+const canvas      = document.getElementById('canvas');
+const stage       = document.getElementById('stage');
+const focusBar    = document.getElementById('focus-bar');
+
+const cmdOutput   = document.getElementById('cmd-output');
+
+const promptLine  = document.getElementById('prompt-line');
+const promptText  = document.getElementById('prompt-text');
+const promptInput = document.getElementById('prompt-input');
+
+const ghostLog    = document.getElementById('ghost-log');
+
+/* ========================================================= */
+/* SCALE */
+/* ========================================================= */
+
+function applyScale(){
+
+  const s=Math.min(
+    window.innerWidth/CW,
+    window.innerHeight/CH
+  );
+
+  canvas.style.transform='scale('+s+')';
+}
+
+applyScale();
+
+window.addEventListener('resize',applyScale);
+
+/* ========================================================= */
+/* STAGE */
+/* ========================================================= */
+
+focusBar.style.top=FT0+'px';
+focusBar.style.height=CELL+'px';
+
+stage.style.gridTemplateColumns=
+  'repeat('+COLS+','+CELL+'px)';
+
+stage.style.gridTemplateRows=
+  'repeat('+ROWS+','+CELL+'px)';
+
+stage.style.width=GW+'px';
+stage.style.height=(ROWS*CELL)+'px';
+
+stage.style.left=SL0+'px';
+stage.style.top=ST0+'px';
+
+/* ========================================================= */
+/* GRID */
+/* ========================================================= */
+
+const cells=[];
+
+function rnd(){
+
+  return CHARS[
+    Math.floor(Math.random()*CHARS.length)
+  ];
+}
+
+function cls(r,locked){
+
+  if(r===CR){
+    return locked ? 'c-target' : 'c-hot';
+  }
+
+  const d=Math.abs(r-CR);
+
+  if(d===1) return 'c-mid';
+  if(d<=3) return 'c-near';
+
+  return 'c-dim';
+}
+
+for(let c=0;c<COLS;c++){
+
+  cells[c]=[];
+
+  for(let r=0;r<ROWS;r++){
+
+    const d=document.createElement('div');
+
+    d.className='cell c-dim';
+
+    d.style.width=CELL+'px';
+    d.style.height=CELL+'px';
+    d.style.fontSize=FS+'px';
+
+    d.style.gridColumn=(c+1);
+    d.style.gridRow=(r+1);
+
+    d.textContent=rnd();
+
+    stage.appendChild(d);
+
+    cells[c][r]=d;
+  }
+}
+
+/* ========================================================= */
+/* AUDIO */
+/* ========================================================= */
+
+let ac=null;
+
+function initAudio(){
+
+  if(!ac){
+    ac=new(window.AudioContext||window.webkitAudioContext)();
+  }
+
+  if(ac.state==='suspended'){
+    ac.resume();
+  }
+}
+
+function beep(freq,dur,vol,type){
+
+  if(!ac) return;
+
+  const o=ac.createOscillator();
+  const g=ac.createGain();
+
+  o.type=type||'sawtooth';
+
+  o.frequency.setValueAtTime(
+    freq,
+    ac.currentTime
+  );
+
+  g.gain.setValueAtTime(
+    vol||0.05,
+    ac.currentTime
+  );
+
+  g.gain.exponentialRampToValueAtTime(
+    0.0001,
+    ac.currentTime+dur
+  );
+
+  o.connect(g);
+  g.connect(ac.destination);
+
+  o.start();
+  o.stop(ac.currentTime+dur);
+}
+
+/* ========================================================= */
+/* STATE */
+/* ========================================================= */
+
+const state=TARGET.map((_,ci)=>({
+
+  offset:0,
+  locked:false,
+  interval:null,
+  ci
+
+}));
+
+/* ========================================================= */
+/* REFRESH */
+/* ========================================================= */
+
+function refreshCol(s){
+
+  for(let r=0;r<ROWS;r++){
+
+    cells[s.ci][r].className=
+      'cell '+cls(r,s.locked);
+
+    if(!s.locked){
+      cells[s.ci][r].textContent=rnd();
     }
   }
-  function rnd(){ return CHARS[Math.floor(Math.random()*CHARS.length)]; }
-  function cls(r,locked){
-    if(r===CR) return locked?'c-target':'c-hot';
-    const d=Math.abs(r-CR); if(d===1) return 'c-mid'; if(d<=3) return 'c-near'; return 'c-dim';
+}
+
+/* ========================================================= */
+/* COMMANDS */
+/* ========================================================= */
+
+const COMMANDS = {
+
+  help:()=>[
+
+'┌──────────────────────────────────────┐',
+'│      NSP CHILE :: TERMINAL HELP      │',
+'├────────────┬─────────────────────────┤',
+'│ help       │ listar comandos         │',
+'│ about      │ info del proyecto       │',
+'│ cobra      │ unidad clasificada      │',
+'│ status     │ estado del sistema      │',
+'│ ping       │ conexión neuraleon      │',
+'│ whoami     │ identidad actual        │',
+'│ clear      │ limpiar consola         │',
+'│ axioma     │ acceso restringido      │',
+'└────────────┴─────────────────────────┘'
+
+  ],
+
+  about:()=>[
+
+'CATN :: COBRA AGAINST THE NEURALYPSIS',
+'',
+'SISTEMA NARRATIVO TECNO-EXISTENCIAL',
+'INTERFAZ NSP CHILE / NEURALEON',
+'',
+'ESTADO:',
+'PROTOTIPO OPERACIONAL'
+
+  ],
+
+  cobra:()=>[
+
+'COBRA :: CLASSIFIED UNIT',
+'',
+'ORIGIN        :: USSR / 1991',
+'FRAME TYPE    :: FELID WAR MACHINE',
+'COGNITION     :: EMERGENT',
+'STATUS        :: OFF-GRID',
+'',
+'LAST KNOWN TRANSMISSION:',
+'',
+'"I AM STILL HERE."',
+'',
+'[NSP INTERNAL ACCESS ONLY]'
+
+  ],
+
+  status:()=>[
+
+'SYSTEM STATUS :: ACTIVE',
+'',
+'REACTOR      :: STABLE',
+'NEURALEON    :: DETECTED',
+'AXIOM WATCH  :: ENABLED',
+'NODE STATE   :: DEGRADED',
+'',
+'COBRA SIGNAL :: LOST'
+
+  ],
+
+  ping:()=>[
+
+'NEURALEON RESPONSE',
+'',
+'NODE STATUS :: DEGRADED',
+'LATENCY     :: 4821ms',
+'SIGNAL      :: UNSTABLE'
+
+  ],
+
+  whoami:()=>[
+
+'USER :: GUEST',
+'CLEARANCE :: 1',
+'',
+'THIS SYSTEM DOES NOT FORGET.'
+
+  ],
+
+  axioma:()=>[
+
+'ACCESS DENIED',
+'',
+'THIS NODE IS OBSERVED',
+'BY THE AXIOM'
+
+  ],
+
+  clear:()=> '__CLEAR__'
+
+};
+
+/* ========================================================= */
+/* COMMAND RUNNER */
+/* ========================================================= */
+
+function runCommand(cmd){
+
+  cmd=cmd.trim().toLowerCase();
+
+  const fn=COMMANDS[cmd];
+
+  if(!fn){
+
+    return [
+
+'COMMAND NOT RECOGNIZED',
+'',
+'TYPE "help"'
+
+    ];
   }
 
-  const state=TARGET.map((_,ci)=>({offset:0,locked:false,interval:null,ci}));
-  function refreshCol(s){
-    for(let r=0;r<ROWS;r++){
-      cells[s.ci][r].className='cell '+cls(r,s.locked);
-      if(!s.locked) cells[s.ci][r].textContent=rnd();
+  return fn();
+}
+
+/* ========================================================= */
+/* TYPEWRITER */
+/* ========================================================= */
+
+function wait(ms){
+
+  return new Promise(
+    r=>setTimeout(r,ms)
+  );
+}
+
+async function typeLine(text){
+
+  for(let i=0;i<text.length;i++){
+
+    let char=text[i];
+
+    if(Math.random()>0.988){
+
+      cmdOutput.textContent+='#';
+
+      await wait(8);
+
+      cmdOutput.textContent=
+        cmdOutput.textContent.slice(0,-1);
     }
-  }
 
-  let ac=null;
-  function initAudio(){ if(!ac) ac=new(window.AudioContext||window.webkitAudioContext)(); if(ac.state==='suspended') ac.resume(); }
-  function beep(freq,dur,vol,type){
-    if(!ac) return; vol=vol||0.05; type=type||'sawtooth';
-    const o=ac.createOscillator(),g=ac.createGain();
-    o.type=type; o.frequency.setValueAtTime(freq,ac.currentTime);
-    g.gain.setValueAtTime(vol,ac.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+dur);
-    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
-  }
+    cmdOutput.textContent+=char;
 
-  /* ── Comandos ── */
-  const COMMANDS = {
-    help: () => [
-      '┌─────────────────────────────────────────────┐',
-      '│           CATN :: COMANDOS DISPONIBLES       │',
-      '├──────────────┬──────────────────────────────┤',
-      '│  help        │  Lista de comandos            │',
-      '│  about       │  Sobre este proyecto          │',
-      '│  cobra       │  Info sobre Cobra             │',
-      '│  status      │  Estado del sistema           │',
-      '│  whoami      │  Identificación de usuario    │',
-      '│  clear       │  Limpiar pantalla             │',
-      '└──────────────┴──────────────────────────────┘',
-    ],
-    about: () => [
-      '  CATN — Cobra: Against the Neuralypsis',
-      '  Proyecto de ciencia ficción ambientado en un',
-      '  futuro cercano bajo control tecnocrático.',
-      '  Primera fase de interfaz activa.',
-      '  [Estado: PROTOTIPO — Fase I]',
-    ],
-    cobra: () => [
-      '  COBRA :: Unidad Clasificada — Origen: URSS ~1991',
-      '  Tipo     : Mecha antropomórfico / Leopardo de las nieves',
-      '  Estado   : Activo — Localización desconocida',
-      '  Cognición: Emergente — No programada, cultivada',
-      '  Amenaza  : No catalogada',
-      '  [ACCESO RESTRINGIDO — NSP CHILE]',
-    ],
-    status: () => [
-      '  SISTEMA CATN v0.1 — TERMINAL ACTIVA',
-      '  Reactor    : ESTABLE',
-      '  Red Neuraleon : DETECTADA',
-      '  NSP Chile  : ALERTA ACTIVA',
-      '  Axioma     : MONITOREANDO',
-      '  Cobra      : ████████ SIN SEÑAL',
-    ],
-    whoami: () => [
-      '  USUARIO NO IDENTIFICADO',
-      '  Acceso provisional concedido.',
-      '  Este sistema no olvida.',
-    ],
-    clear: () => '__CLEAR__',
-  };
+    if(char!==' '){
 
-  function runCommand(cmd){
-    cmd = cmd.trim().toLowerCase();
-    const fn = COMMANDS[cmd];
-    if(!fn){ return ['  Comando no reconocido: "'+cmd+'"','  Escribe  help  para ver los comandos disponibles.']; }
-    return fn();
-  }
-
-  /* ── Output de comandos ── */
-  let outputTop = 0; // se calcula cuando la animación termina
-  const cmdOutput = document.getElementById('cmd-output');
-
-  function printOutput(lines){
-    if(lines === '__CLEAR__' || lines[0] === '__CLEAR__'){
-      cmdOutput.textContent=''; return;
+      beep(
+        40+Math.random()*25,
+        0.012,
+        0.008,
+        'square'
+      );
     }
-    cmdOutput.textContent = lines.join('\n');
+
+    await wait(
+      char===' '
+        ? 5
+        : 14+Math.random()*14
+    );
   }
 
-  /* ── Prompt interactivo ── */
-  const promptLine   = document.getElementById('prompt-line');
-  const promptText   = document.getElementById('prompt-text');
-  const promptInput  = document.getElementById('prompt-input');
+  cmdOutput.textContent+='\n';
+}
 
-  promptInput.addEventListener('input', ()=>{
-    promptText.textContent = promptInput.value;
-  });
-  promptInput.addEventListener('keydown', (e)=>{
-    beep(55+Math.random()*30, 0.06, 0.04, 'sawtooth');
-    if(e.key==='Enter'){
-      const cmd = promptInput.value;
-      promptInput.value='';
-      promptText.textContent='';
-      const result = runCommand(cmd);
-      printOutput(result);
+async function printOutput(lines){
+
+  if(lines==='__CLEAR__' || lines[0]==='__CLEAR__'){
+
+    cmdOutput.textContent='';
+
+    return;
+  }
+
+  cmdOutput.textContent='';
+
+  for(const line of lines){
+
+    await typeLine(line);
+
+    await wait(40);
+  }
+}
+
+/* ========================================================= */
+/* PROMPT */
+/* ========================================================= */
+
+promptInput.addEventListener('input',()=>{
+
+  promptText.textContent=promptInput.value;
+});
+
+promptInput.addEventListener('keydown',async(e)=>{
+
+  beep(
+    55+Math.random()*30,
+    0.04,
+    0.03,
+    'sawtooth'
+  );
+
+  if(e.key==='Enter'){
+
+    const cmd=promptInput.value;
+
+    promptInput.value='';
+    promptText.textContent='';
+
+    const result=runCommand(cmd);
+
+    await printOutput(result);
+  }
+});
+
+/* ========================================================= */
+/* EXIT ANIMATION */
+/* ========================================================= */
+
+function startExit(){
+
+  const STEPS_UP=4;
+  const STEPS_LEFT=6;
+  const STEPS=STEPS_LEFT;
+
+  let barTop=FT0;
+  let stTop=ST0;
+  let stLeft=SL0;
+
+  let pLeft=SL0+GW+Math.round(CELL*0.35);
+
+  let step=0;
+
+  const tick=setInterval(()=>{
+
+    step++;
+
+    if(step<=STEPS_UP){
+
+      barTop-=CELL;
+
+      focusBar.style.top=barTop+'px';
+
+      stTop-=CELL;
+
+      stage.style.top=stTop+'px';
+
+      promptLine.style.top=
+        (barTop+CELL/2)+'px';
     }
-  });
 
-  /* ── Animación de salida ── */
-  function startExit(){
-    const STEPS_UP=4, STEPS_LEFT=6, STEPS=STEPS_LEFT;
-    let barTop=FT0, stTop=ST0, stLeft=SL0;
-    let pLeft=SL0+GW+Math.round(CELL*0.35);
-    let step=0;
+    stLeft-=CELL;
 
-    const tick=setInterval(()=>{
-      step++;
-      if(step<=STEPS_UP){
-        barTop-=CELL; focusBar.style.top=barTop+'px';
-        stTop -=CELL; stage.style.top=stTop+'px';
-        promptLine.style.top=(barTop+CELL/2)+'px';
-      }
-      stLeft-=CELL; stage.style.left=stLeft+'px';
-      pLeft -=CELL; promptLine.style.left=pLeft+'px';
-      beep(Math.max(28,70-step*4),0.12,0.06,'sawtooth');
-      if(step>=STEPS){
-        clearInterval(tick);
-        // posicionar output debajo de la barra final
-        const outTop = barTop + CELL + 20;
-        cmdOutput.style.top    = outTop+'px';
-        cmdOutput.style.left   = pLeft+'px';
-        cmdOutput.style.display= 'block';
-        promptInput.focus();
-      }
-    },120);
-  }
+    stage.style.left=stLeft+'px';
 
-  /* ── Mostrar prompt ── */
-  function showPrompt(){
-    promptLine.style.left      =(SL0+GW+Math.round(CELL*0.35))+'px';
-    promptLine.style.top       =(FT0+CELL/2)+'px';
-    promptLine.style.transform ='translateY(-50%)';
-    promptLine.style.display   ='flex';
-    setTimeout(startExit, 400);
-  }
+    pLeft-=CELL;
 
-  /* ── Lock ── */
-  let locked=0;
-  function lockCol(s){
-    s.locked=true; clearInterval(s.interval);
-    for(let r=0;r<ROWS;r++){
-      cells[s.ci][r].className='cell '+cls(r,true);
-      cells[s.ci][r].textContent=(r===CR)?TARGET[s.ci]:rnd();
+    promptLine.style.left=pLeft+'px';
+
+    beep(
+      Math.max(28,70-step*4),
+      0.08,
+      0.04,
+      'sawtooth'
+    );
+
+    if(step>=STEPS){
+
+      clearInterval(tick);
+
+      const outTop=barTop+CELL+20;
+
+      cmdOutput.style.top=outTop+'px';
+      cmdOutput.style.left=pLeft+'px';
+
+      cmdOutput.style.display='block';
+
+      promptInput.focus();
     }
-    beep(55+s.ci*10,0.5,0.07,'sawtooth');
-    if(++locked===COLS){
+
+  },120);
+}
+
+/* ========================================================= */
+/* SHOW PROMPT */
+/* ========================================================= */
+
+function showPrompt(){
+
+  promptLine.style.left=
+    (SL0+GW+Math.round(CELL*0.35))+'px';
+
+  promptLine.style.top=
+    (FT0+CELL/2)+'px';
+
+  promptLine.style.transform=
+    'translateY(-50%)';
+
+  promptLine.style.display='flex';
+
+  setTimeout(startExit,400);
+}
+
+/* ========================================================= */
+/* LOCK */
+/* ========================================================= */
+
+let locked=0;
+
+function lockCol(s){
+
+  s.locked=true;
+
+  clearInterval(s.interval);
+
+  for(let r=0;r<ROWS;r++){
+
+    cells[s.ci][r].className=
+      'cell '+cls(r,true);
+
+    cells[s.ci][r].textContent=
+      (r===CR)
+        ? TARGET[s.ci]
+        : rnd();
+  }
+
+  beep(
+    55+s.ci*10,
+    0.5,
+    0.06,
+    'sawtooth'
+  );
+
+  if(++locked===COLS){
+
+    setTimeout(()=>{
+
+      beep(55,0.6,0.08,'sawtooth');
+
       setTimeout(()=>{
-        beep(55,0.6,0.08,'sawtooth');
-        setTimeout(()=>beep(82,0.5,0.07,'sawtooth'),200);
-        setTimeout(()=>beep(110,0.7,0.06,'sawtooth'),400);
-        setTimeout(showPrompt,900);
-      },300);
+        beep(82,0.5,0.07,'sawtooth');
+      },200);
+
+      setTimeout(()=>{
+        beep(110,0.7,0.06,'sawtooth');
+      },400);
+
+      setTimeout(showPrompt,900);
+
+    },300);
+  }
+}
+
+/* ========================================================= */
+/* RUN COL */
+/* ========================================================= */
+
+function runCol(s){
+
+  let t=0;
+
+  const stop=
+    60+s.ci*30+
+    Math.floor(Math.random()*20);
+
+  s.interval=setInterval(()=>{
+
+    t++;
+
+    s.offset=(s.offset+1)%ROWS;
+
+    refreshCol(s);
+
+    if(Math.random()>0.80){
+
+      beep(
+        30+Math.random()*40,
+        0.03,
+        0.01,
+        'square'
+      );
     }
+
+    if(t>=stop){
+      lockCol(s);
+    }
+
+  },48+s.ci*15);
+}
+
+/* ========================================================= */
+/* GHOST EVENTS */
+/* ========================================================= */
+
+function flashMessage(msg){
+
+  ghostLog.textContent=msg;
+
+  ghostLog.style.opacity='0.9';
+
+  setTimeout(()=>{
+
+    ghostLog.style.opacity='0';
+
+  },2200);
+}
+
+setInterval(()=>{
+
+  if(!started) return;
+
+  if(Math.random()>0.94){
+
+    const msgs=[
+
+'[NEURALEON SIGNAL DETECTED]',
+'[MEMORY FRAGMENT RECOVERED]',
+'[AXIOM WATCH ACTIVE]',
+'[COBRA LAST SEEN :: UNKNOWN]',
+'[UNAUTHORIZED THOUGHT PATTERN]',
+'[NODE DESYNC DETECTED]'
+
+    ];
+
+    flashMessage(
+      msgs[
+        Math.floor(Math.random()*msgs.length)
+      ]
+    );
   }
 
-  /* ── Run col ── */
-  function runCol(s){
-    let t=0; const stop=60+s.ci*30+Math.floor(Math.random()*20);
-    s.interval=setInterval(()=>{
-      t++; s.offset=(s.offset+1)%ROWS; refreshCol(s);
-      if(Math.random()>0.78) beep(30+Math.random()*40,0.04,0.012,'sawtooth');
-      if(t>=stop) lockCol(s);
-    },48+s.ci*15);
+},7000);
+
+/* ========================================================= */
+/* RANDOM GLITCH */
+/* ========================================================= */
+
+setInterval(()=>{
+
+  if(Math.random()>0.97){
+
+    canvas.style.transform +=
+      ' skewX(0.5deg)';
+
+    setTimeout(()=>{
+      applyScale();
+    },80);
   }
 
-  /* ── Click para iniciar ── */
-  let started=false;
-  document.addEventListener('click',()=>{
-    if(started) return; started=true; initAudio();
-    document.getElementById('boot-msg').style.display='none';
-    state.forEach((s,i)=>setTimeout(()=>runCol(s),i*130));
+},3000);
+
+/* ========================================================= */
+/* START */
+/* ========================================================= */
+
+let started=false;
+
+document.addEventListener('click',()=>{
+
+  if(started) return;
+
+  started=true;
+
+  initAudio();
+
+  document.getElementById('boot-msg').style.display='none';
+
+  state.forEach((s,i)=>{
+
+    setTimeout(()=>{
+
+      runCol(s);
+
+    },i*130);
+
   });
+
+});
+
 })();
 </script>
+
 </body>
 </html>
