@@ -103,13 +103,72 @@ body::after{
   justify-content:center;
 }
 
-#canvas{
+#viewport{
   position:relative;
+  overflow:hidden;
+  flex:0 0 auto;
+}
+
+#canvas{
+  position:absolute;
+  left:0;
+  top:0;
   width:2560px;
   height:1440px;
   overflow:hidden;
 
-  transform-origin:center center;
+  transform-origin:left top;
+}
+
+#canvas::before{
+  content:'';
+  position:absolute;
+  inset:-4%;
+  pointer-events:none;
+  z-index:460;
+
+  opacity:0.22;
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255,0,64,0.05),
+      transparent 22%,
+      transparent 78%,
+      rgba(0,128,255,0.05)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(0,255,65,0.045) 0px,
+      transparent 1px,
+      transparent 6px
+    );
+
+  mix-blend-mode:screen;
+  animation:crtDrift 5.5s infinite linear;
+}
+
+#canvas::after{
+  content:'';
+  position:absolute;
+  left:0;
+  top:-20%;
+  width:100%;
+  height:18%;
+  pointer-events:none;
+  z-index:461;
+
+  opacity:0.16;
+
+  background:
+    linear-gradient(
+      180deg,
+      transparent,
+      rgba(0,255,65,0.18),
+      transparent
+    );
+
+  animation:verticalHold 7s infinite ease-in-out;
 }
 
 #canvas.alert{
@@ -285,6 +344,17 @@ body::after{
   100%{ transform:scale(var(--scale,1)) translate(0,0); }
 }
 
+@keyframes crtDrift{
+  from{ transform:translateY(0); }
+  to{ transform:translateY(18px); }
+}
+
+@keyframes verticalHold{
+  0%,78%{ transform:translateY(-180px); opacity:0; }
+  82%{ opacity:0.18; }
+  100%{ transform:translateY(1780px); opacity:0; }
+}
+
 #focus-bar{
   position:absolute;
   left:0;
@@ -426,45 +496,49 @@ body::after{
 
 <div id="scaler">
 
-  <div id="canvas">
+  <div id="viewport">
 
-    <div id="atmosphere"></div>
+    <div id="canvas">
 
-    <div id="burst"></div>
+      <div id="atmosphere"></div>
 
-    <div id="scan-band"></div>
+      <div id="burst"></div>
 
-    <div id="focus-bar"></div>
+      <div id="scan-band"></div>
 
-    <div id="stage"></div>
+      <div id="focus-bar"></div>
 
-    <div id="boot-msg">
-      [ CLICK PARA INICIAR SECUENCIA ]
-    </div>
+      <div id="stage"></div>
 
-    <div id="prompt-line">
-      <span id="prompt-prefix">
-        NSP_CHILE://ROOT&gt;
-      </span>
+      <div id="boot-msg">
+        [ CLICK PARA INICIAR SECUENCIA ]
+      </div>
 
-      <span id="prompt-text"></span>
+      <div id="prompt-line">
+        <span id="prompt-prefix">
+          NSP_CHILE://ROOT&gt;
+        </span>
 
-      <span id="prompt-cursor"></span>
-    </div>
+        <span id="prompt-text"></span>
 
-    <input
-      id="prompt-input"
-      type="text"
-      autocomplete="off"
-      spellcheck="false"
-    />
+        <span id="prompt-cursor"></span>
+      </div>
 
-    <div id="cmd-output"></div>
+      <input
+        id="prompt-input"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+      />
 
-    <div id="ghost-log"></div>
+      <div id="cmd-output"></div>
 
-    <div id="telemetry">
-      SIG: -- / TEMP: COLD / WATCH: PASSIVE
+      <div id="ghost-log"></div>
+
+      <div id="telemetry">
+        SIG: -- / TEMP: COLD / WATCH: PASSIVE
+      </div>
+
     </div>
 
   </div>
@@ -481,6 +555,9 @@ body::after{
 
 const CW=2560;
 const CH=1440;
+
+const DEFAULT_SCALE_CALIBRATION=1;
+const SCALE_STORAGE_KEY='catn_layout_scale_v2';
 
 const CELL=160;
 const FS=100;
@@ -500,6 +577,14 @@ const GW=COLS*CELL;
 const SL0=(CW-GW)/2;
 const ST0=0;
 const FT0=CR*CELL;
+
+let scaleCalibration=parseFloat(
+  localStorage.getItem(SCALE_STORAGE_KEY)
+);
+
+if(!Number.isFinite(scaleCalibration)){
+  scaleCalibration=DEFAULT_SCALE_CALIBRATION;
+}
 
 /* ========================================================= */
 /* SYSTEM */
@@ -534,6 +619,7 @@ const SYSTEM = {
 /* ELEMENTS */
 /* ========================================================= */
 
+const viewport    = document.getElementById('viewport');
 const canvas      = document.getElementById('canvas');
 const atmosphere  = document.getElementById('atmosphere');
 const burst       = document.getElementById('burst');
@@ -556,10 +642,23 @@ const telemetry   = document.getElementById('telemetry');
 
 function applyScale(){
 
-  const s=Math.min(
-    window.innerWidth/CW,
-    window.innerHeight/CH
+  const vw=window.visualViewport
+    ? window.visualViewport.width
+    : window.innerWidth;
+
+  const vh=window.visualViewport
+    ? window.visualViewport.height
+    : window.innerHeight;
+
+  const baseScale=Math.min(
+    vw/CW,
+    vh/CH
   );
+
+  const s=baseScale*scaleCalibration;
+
+  viewport.style.width=(CW*s)+'px';
+  viewport.style.height=(CH*s)+'px';
 
   canvas.style.setProperty('--scale',s);
   canvas.style.transform='scale('+s+')';
@@ -568,6 +667,10 @@ function applyScale(){
 applyScale();
 
 window.addEventListener('resize',applyScale);
+
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',applyScale);
+}
 
 /* ========================================================= */
 /* STAGE */
@@ -1037,6 +1140,20 @@ function setOutput(lines,page){
 /* MAP SYSTEM */
 /* ========================================================= */
 
+const MAP_LINES_FAR=[
+'~~~~~~~~~~~~~~~~~~~~ CHILE / NSP MACRO VIEW ~~~~~~~~~~~~~~~~~~~~',
+'~~~~ PACIFICO ~~~~~~~ | NORTE GRANDE | ^ ANDES ^ ~~~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | ARICA - IQUIQUE - ATACAMA# ~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | ANTOFAGASTA - COPIAPO ~~~~~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | LA SERENA ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | VALPARAISO* / VINA* / SANTIAGO* ~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | RANCAGUA - TALCA - CONCEPCION ~~~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | TEMUCO - VALDIVIA - PUERTO MONTT ~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~ | COYHAIQUE - PUNTA ARENAS ~~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+'LEYENDA: # despertar Cobra  * actividad Cobra  ^ cordillera'
+];
+
 const MAP_LINES=[
 '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
 '~~~~~~~~~~~~~ PACIFICO SUR / COSTA CHILENA ~~~~~~~~~~~~~~~~~',
@@ -1081,18 +1198,54 @@ const MAP_LINES=[
 '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
 ];
 
+const MAP_LINES_NEAR=[
+'~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+'~~~~~ DETALLE COSTA CENTRAL / CORREDOR NSP ~~~~~~~~~~~~~~~~~',
+'~~~~~                                                       ',
+'~~~~~       cerros / techumbres / quebradas                 ',
+'~~~~~             . . . . . . . . .                         ',
+'~~~~~        * VALPARAISO                                   ',
+'~~~~~          | puerto historico                           ',
+'~~~~~          | rutas verticales                           ',
+'~~~~~          | camaras con angulos muertos                ',
+'~~~~~          |                                            ',
+'~~~~~          +------ * VINA DEL MAR                       ',
+'~~~~~                    nodo Neuraleon                     ',
+'~~~~~                    vigilancia elegante                ',
+'~~~~~                    costa premium                      ',
+'~~~~~                                                       ',
+'~~~~~                         \\                             ',
+'~~~~~                          \\ corredor central           ',
+'~~~~~                           \\                           ',
+'~~~~~                            * SANTIAGO                 ',
+'~~~~~                              densidad maxima          ',
+'~~~~~                              gobierno / finanzas      ',
+'~~~~~                              decision automatizada    ',
+'~~~~~                                                       ',
+'~~~~~  Use out para volver al mapa nacional                 ',
+'~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+];
+
+function activeMapLines(){
+
+  if(SYSTEM.mapZoom<=0) return MAP_LINES_FAR;
+  if(SYSTEM.mapZoom>=2) return MAP_LINES_NEAR;
+  return MAP_LINES;
+}
+
 function mapWidth(){
 
-  return Math.max(...MAP_LINES.map(line=>line.length));
+  return Math.max(...activeMapLines().map(line=>line.length));
 }
 
 function renderChileMap(){
 
   const zoom=SYSTEM.mapZoom;
-  const viewW=zoom===2 ? 46 : 60;
-  const viewH=zoom===2 ? 14 : 16;
+  const viewW=zoom===2 ? 54 : 60;
+  const viewH=zoom===0 ? 14 : 16;
+  const mapLines=activeMapLines();
   const width=mapWidth();
-  const height=MAP_LINES.length;
+  const height=mapLines.length;
 
   SYSTEM.mapX=Math.max(
     0,
@@ -1113,7 +1266,7 @@ function renderChileMap(){
 
   for(let y=SYSTEM.mapY;y<SYSTEM.mapY+viewH;y++){
 
-    const source=(MAP_LINES[y]||'').padEnd(width,' ');
+    const source=(mapLines[y]||'').padEnd(width,' ');
     lines.push(source.slice(SYSTEM.mapX,SYSTEM.mapX+viewW));
   }
 
@@ -1376,6 +1529,7 @@ const COMMANDS = {
 '  whoami    credencial local',
 '  scan      barrido forense',
 '  ping      pulso a Neuraleon',
+'  scale     ajustar escala visual',
 '',
 'ARCHIVO',
 '  about     premisa CATN',
@@ -1629,6 +1783,62 @@ sonarPulse(),
 'observar tambien modifica el experimento.'
 
   ],
+
+  scale:(args)=>{
+
+    const value=args[0];
+
+    if(!value){
+      return [
+        'DISPLAY SCALE',
+        '',
+        'CURRENT :: '+scaleCalibration.toFixed(2),
+        'DEFAULT :: '+DEFAULT_SCALE_CALIBRATION.toFixed(2),
+        '',
+        'Uso:',
+        'scale 1.05',
+        'scale 1.10',
+        'scale 1.15',
+        'scale reset'
+      ];
+    }
+
+    if(value==='reset'){
+      scaleCalibration=DEFAULT_SCALE_CALIBRATION;
+    }else{
+      const next=parseFloat(value);
+
+      if(!Number.isFinite(next) || next<0.75 || next>1.45){
+        return [
+          'DISPLAY SCALE :: VALUE REJECTED',
+          '',
+          'Use un valor entre 0.75 y 1.45',
+          'Ejemplo: scale 1.10'
+        ];
+      }
+
+      scaleCalibration=next;
+    }
+
+    localStorage.setItem(
+      SCALE_STORAGE_KEY,
+      String(scaleCalibration)
+    );
+
+    applyScale();
+
+    return [
+      'DISPLAY SCALE UPDATED',
+      '',
+      'CURRENT :: '+scaleCalibration.toFixed(2),
+      '',
+      'Si se ve demasiado grande:',
+      'scale 1.05',
+      '',
+      'Si se ve demasiado pequeno:',
+      'scale 1.15'
+    ];
+  },
 
   scan:()=>[
 
@@ -1887,14 +2097,18 @@ sensoryEvent('scan'),
 
   in:()=>{
     SYSTEM.mode='map';
-    SYSTEM.mapZoom=2;
+    SYSTEM.mapZoom=Math.min(2,SYSTEM.mapZoom+1);
+    SYSTEM.mapX=0;
+    SYSTEM.mapY=0;
     sensoryEvent('scan');
     return renderChileMap();
   },
 
   out:()=>{
     SYSTEM.mode='map';
-    SYSTEM.mapZoom=1;
+    SYSTEM.mapZoom=Math.max(0,SYSTEM.mapZoom-1);
+    SYSTEM.mapX=0;
+    SYSTEM.mapY=0;
     sensoryEvent('scan');
     return renderChileMap();
   },
