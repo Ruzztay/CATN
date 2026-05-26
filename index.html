@@ -112,6 +112,107 @@ body::after{
   transform-origin:center center;
 }
 
+#canvas.alert{
+  animation:canvasAlert 0.45s steps(2,end);
+}
+
+#canvas.deep-listen{
+  filter:contrast(1.18) saturate(1.2);
+}
+
+#atmosphere{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:8;
+
+  opacity:0.18;
+
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(0,255,65,0.11),
+      transparent 26%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(0,72,255,0.08),
+      transparent 24%,
+      transparent 76%,
+      rgba(255,0,96,0.06)
+    );
+
+  mix-blend-mode:screen;
+  transition:opacity 0.6s, filter 0.6s;
+}
+
+#atmosphere.bloom{
+  opacity:0.35;
+  filter:brightness(1.6);
+}
+
+#atmosphere.warning{
+  opacity:0.42;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(255,20,82,0.16),
+      transparent 30%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(0,255,65,0.08),
+      transparent 50%,
+      rgba(255,20,82,0.12)
+    );
+}
+
+#burst{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:450;
+
+  opacity:0;
+
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0px,
+      transparent 32px,
+      rgba(0,255,65,0.18) 34px,
+      transparent 38px
+    );
+}
+
+#burst.active{
+  animation:burstPulse 0.34s steps(2,end);
+}
+
+#scan-band{
+  position:absolute;
+  left:0;
+  top:-180px;
+  width:100%;
+  height:180px;
+  pointer-events:none;
+  z-index:430;
+
+  opacity:0;
+
+  background:
+    linear-gradient(
+      180deg,
+      transparent,
+      rgba(0,255,65,0.18),
+      transparent
+    );
+}
+
+#scan-band.active{
+  animation:scanSweep 1.25s ease-in-out;
+}
+
 #stage{
   position:absolute;
   display:grid;
@@ -159,6 +260,29 @@ body::after{
 @keyframes flick{
   from{ opacity:0.92; }
   to{ opacity:1; }
+}
+
+@keyframes burstPulse{
+  0%{ opacity:0; transform:translateX(0); }
+  25%{ opacity:0.55; transform:translateX(-18px); }
+  50%{ opacity:0.12; transform:translateX(14px); }
+  75%{ opacity:0.42; transform:translateX(-8px); }
+  100%{ opacity:0; transform:translateX(0); }
+}
+
+@keyframes scanSweep{
+  0%{ opacity:0; transform:translateY(0); }
+  15%{ opacity:0.85; }
+  85%{ opacity:0.65; }
+  100%{ opacity:0; transform:translateY(1620px); }
+}
+
+@keyframes canvasAlert{
+  0%{ transform:scale(var(--scale,1)) translate(0,0); }
+  25%{ transform:scale(var(--scale,1)) translate(8px,-4px); }
+  50%{ transform:scale(var(--scale,1)) translate(-10px,3px); }
+  75%{ transform:scale(var(--scale,1)) translate(6px,4px); }
+  100%{ transform:scale(var(--scale,1)) translate(0,0); }
 }
 
 #focus-bar{
@@ -245,12 +369,16 @@ body::after{
 
   display:none;
 
-  white-space:pre-wrap;
+  width:1760px;
+  max-height:1040px;
+  overflow:hidden;
+
+  white-space:pre;
 
   color:rgba(0,255,65,0.78);
 
-  font-size:48px;
-  line-height:1.55;
+  font-size:36px;
+  line-height:1.25;
   letter-spacing:0.04em;
 
   z-index:200;
@@ -273,6 +401,22 @@ body::after{
   transition:opacity 0.4s;
 }
 
+#telemetry{
+  position:absolute;
+
+  right:90px;
+  bottom:72px;
+
+  color:rgba(0,255,65,0.38);
+
+  font-size:22px;
+  line-height:1.65;
+  letter-spacing:0.12em;
+  text-align:right;
+
+  z-index:180;
+}
+
 </style>
 </head>
 
@@ -283,6 +427,12 @@ body::after{
 <div id="scaler">
 
   <div id="canvas">
+
+    <div id="atmosphere"></div>
+
+    <div id="burst"></div>
+
+    <div id="scan-band"></div>
 
     <div id="focus-bar"></div>
 
@@ -312,6 +462,10 @@ body::after{
     <div id="cmd-output"></div>
 
     <div id="ghost-log"></div>
+
+    <div id="telemetry">
+      SIG: -- / TEMP: COLD / WATCH: PASSIVE
+    </div>
 
   </div>
 
@@ -357,6 +511,22 @@ const SYSTEM = {
   user      : 'guest',
   connected : true,
   axioma    : false,
+  commands  : 0,
+  listening : false,
+  lastTrace : 'NO TRACE',
+  fragments : {
+    '001':false,
+    '014':false,
+    '031':false,
+    '055':false
+  },
+  heat      : 0,
+  output    : [],
+  page      : 0,
+  mode      : 'terminal',
+  mapX      : 0,
+  mapY      : 0,
+  mapZoom   : 1,
 
 };
 
@@ -365,6 +535,9 @@ const SYSTEM = {
 /* ========================================================= */
 
 const canvas      = document.getElementById('canvas');
+const atmosphere  = document.getElementById('atmosphere');
+const burst       = document.getElementById('burst');
+const scanBand    = document.getElementById('scan-band');
 const stage       = document.getElementById('stage');
 const focusBar    = document.getElementById('focus-bar');
 
@@ -375,6 +548,7 @@ const promptText  = document.getElementById('prompt-text');
 const promptInput = document.getElementById('prompt-input');
 
 const ghostLog    = document.getElementById('ghost-log');
+const telemetry   = document.getElementById('telemetry');
 
 /* ========================================================= */
 /* SCALE */
@@ -387,6 +561,7 @@ function applyScale(){
     window.innerHeight/CH
   );
 
+  canvas.style.setProperty('--scale',s);
   canvas.style.transform='scale('+s+')';
 }
 
@@ -470,21 +645,60 @@ for(let c=0;c<COLS;c++){
 /* ========================================================= */
 
 let ac=null;
+let masterGain=null;
+let droneOsc=null;
+let droneGain=null;
+let tremolo=null;
+let tremoloGain=null;
+let atmosphereLevel=0.16;
 
 function initAudio(){
 
   if(!ac){
     ac=new(window.AudioContext||window.webkitAudioContext)();
+
+    masterGain=ac.createGain();
+    masterGain.gain.setValueAtTime(0.72,ac.currentTime);
+    masterGain.connect(ac.destination);
+
+    droneOsc=ac.createOscillator();
+    droneGain=ac.createGain();
+    tremolo=ac.createOscillator();
+    tremoloGain=ac.createGain();
+
+    droneOsc.type='sine';
+    droneOsc.frequency.setValueAtTime(34,ac.currentTime);
+
+    tremolo.type='sine';
+    tremolo.frequency.setValueAtTime(0.18,ac.currentTime);
+
+    droneGain.gain.setValueAtTime(0.00001,ac.currentTime);
+    tremoloGain.gain.setValueAtTime(0.002,ac.currentTime);
+
+    tremolo.connect(tremoloGain);
+    tremoloGain.connect(droneGain.gain);
+    droneOsc.connect(droneGain);
+    droneGain.connect(masterGain);
+
+    droneOsc.start();
+    tremolo.start();
   }
 
   if(ac.state==='suspended'){
     ac.resume();
   }
+
+  droneGain.gain.cancelScheduledValues(ac.currentTime);
+  droneGain.gain.setTargetAtTime(
+    0.00001,
+    ac.currentTime,
+    0.5
+  );
 }
 
 function beep(freq,dur,vol,type){
 
-  if(!ac) return;
+  if(!ac || !masterGain) return;
 
   const o=ac.createOscillator();
   const g=ac.createGain();
@@ -507,10 +721,134 @@ function beep(freq,dur,vol,type){
   );
 
   o.connect(g);
-  g.connect(ac.destination);
+  g.connect(masterGain);
 
   o.start();
   o.stop(ac.currentTime+dur);
+}
+
+function noiseBurst(dur,vol){
+
+  if(!ac || !masterGain) return;
+
+  const len=Math.floor(ac.sampleRate*dur);
+  const buffer=ac.createBuffer(1,len,ac.sampleRate);
+  const data=buffer.getChannelData(0);
+
+  for(let i=0;i<len;i++){
+    data[i]=(Math.random()*2-1)*(1-i/len);
+  }
+
+  const src=ac.createBufferSource();
+  const filter=ac.createBiquadFilter();
+  const g=ac.createGain();
+
+  filter.type='bandpass';
+  filter.frequency.setValueAtTime(
+    900+Math.random()*1200,
+    ac.currentTime
+  );
+  filter.Q.setValueAtTime(4,ac.currentTime);
+
+  g.gain.setValueAtTime(vol||0.025,ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(
+    0.0001,
+    ac.currentTime+dur
+  );
+
+  src.buffer=buffer;
+  src.connect(filter);
+  filter.connect(g);
+  g.connect(masterGain);
+
+  src.start();
+}
+
+function ambientBreath(dur,vol){
+
+  if(!ac || !masterGain) return;
+
+  const len=Math.floor(ac.sampleRate*dur);
+  const buffer=ac.createBuffer(1,len,ac.sampleRate);
+  const data=buffer.getChannelData(0);
+
+  for(let i=0;i<len;i++){
+
+    const fadeIn=Math.min(1,i/(len*0.24));
+    const fadeOut=Math.min(1,(len-i)/(len*0.42));
+    const env=Math.min(fadeIn,fadeOut);
+
+    data[i]=(Math.random()*2-1)*env;
+  }
+
+  const src=ac.createBufferSource();
+  const low=ac.createBiquadFilter();
+  const g=ac.createGain();
+
+  low.type='lowpass';
+  low.frequency.setValueAtTime(110,ac.currentTime);
+  low.Q.setValueAtTime(0.7,ac.currentTime);
+
+  g.gain.setValueAtTime(vol||0.012,ac.currentTime);
+
+  src.buffer=buffer;
+  src.connect(low);
+  low.connect(g);
+  g.connect(masterGain);
+
+  src.start();
+}
+
+function sweep(from,to,dur,vol,type){
+
+  if(!ac || !masterGain) return;
+
+  const o=ac.createOscillator();
+  const g=ac.createGain();
+
+  o.type=type||'sine';
+  o.frequency.setValueAtTime(from,ac.currentTime);
+  o.frequency.exponentialRampToValueAtTime(
+    Math.max(1,to),
+    ac.currentTime+dur
+  );
+
+  g.gain.setValueAtTime(vol||0.025,ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(
+    0.0001,
+    ac.currentTime+dur
+  );
+
+  o.connect(g);
+  g.connect(masterGain);
+
+  o.start();
+  o.stop(ac.currentTime+dur);
+}
+
+function sonarPulse(){
+
+  beep(132,0.08,0.035,'sine');
+
+  setTimeout(()=>{
+    beep(264,0.06,0.024,'sine');
+  },130);
+
+  setTimeout(()=>{
+    beep(396,0.05,0.018,'sine');
+  },260);
+}
+
+function commandThump(){
+
+  beep(42,0.08,0.05,'sawtooth');
+  noiseBurst(0.08,0.018);
+}
+
+function deniedSound(){
+
+  sweep(180,32,0.35,0.05,'sawtooth');
+  noiseBurst(0.18,0.045);
 }
 
 /* ========================================================= */
@@ -544,6 +882,486 @@ function refreshCol(s){
 }
 
 /* ========================================================= */
+/* SENSORY EVENTS */
+/* ========================================================= */
+
+function updateTelemetry(msg){
+
+  telemetry.textContent=msg;
+}
+
+function pulseAtmosphere(mode){
+
+  atmosphere.classList.remove('bloom','warning');
+
+  if(mode==='warning'){
+    atmosphere.classList.add('warning');
+  }else{
+    atmosphere.classList.add('bloom');
+  }
+
+  setTimeout(()=>{
+    atmosphere.classList.remove('bloom','warning');
+  },900);
+}
+
+function burstGlitch(){
+
+  burst.classList.remove('active');
+  void burst.offsetWidth;
+  burst.classList.add('active');
+
+  canvas.classList.add('alert');
+
+  setTimeout(()=>{
+    canvas.classList.remove('alert');
+  },460);
+}
+
+function scanSweep(){
+
+  scanBand.classList.remove('active');
+  void scanBand.offsetWidth;
+  scanBand.classList.add('active');
+}
+
+function sensoryEvent(type){
+
+  if(type==='scan'){
+    scanSweep();
+    pulseAtmosphere('bloom');
+    ambientBreath(1.2,0.010);
+    sweep(90,660,0.8,0.034,'sine');
+    noiseBurst(0.22,0.022);
+    updateTelemetry('SIG: 48% / TEMP: WARM / WATCH: PASSIVE');
+    return;
+  }
+
+  if(type==='trace'){
+    burstGlitch();
+    pulseAtmosphere('warning');
+    sweep(420,55,0.42,0.05,'sawtooth');
+    updateTelemetry('SIG: SPLIT / TEMP: HOT / WATCH: ACTIVE');
+    return;
+  }
+
+  if(type==='memory'){
+    pulseAtmosphere('bloom');
+    ambientBreath(1.8,0.014);
+    sonarPulse();
+    updateTelemetry('SIG: ECHO / TEMP: COLD / WATCH: LISTENING');
+    return;
+  }
+
+  if(type==='denied'){
+    burstGlitch();
+    pulseAtmosphere('warning');
+    deniedSound();
+    updateTelemetry('SIG: LOCKED / TEMP: HOT / WATCH: AXIOM');
+    return;
+  }
+
+  if(type==='listen'){
+    canvas.classList.add('deep-listen');
+    pulseAtmosphere('bloom');
+    ambientBreath(2.8,0.018);
+    sweep(34,58,1.4,0.032,'triangle');
+    updateTelemetry('SIG: OPEN / TEMP: LOW / WATCH: PASSIVE');
+
+    setTimeout(()=>{
+      canvas.classList.remove('deep-listen');
+    },2600);
+    return;
+  }
+
+  commandThump();
+}
+
+function markFragment(id){
+
+  if(SYSTEM.fragments[id]!==undefined){
+    SYSTEM.fragments[id]=true;
+  }
+}
+
+function fragmentCount(){
+
+  return Object.values(SYSTEM.fragments).filter(Boolean).length;
+}
+
+function chunkLines(lines,size){
+
+  const pages=[];
+
+  for(let i=0;i<lines.length;i+=size){
+    pages.push(lines.slice(i,i+size));
+  }
+
+  return pages.length ? pages : [[]];
+}
+
+function renderPagedOutput(){
+
+  const pages=chunkLines(SYSTEM.output,20);
+
+  SYSTEM.page=Math.max(
+    0,
+    Math.min(SYSTEM.page,pages.length-1)
+  );
+
+  const visible=pages[SYSTEM.page].slice();
+
+  if(pages.length>1){
+    visible.push('');
+    visible.push(
+      '[PAGE '+(SYSTEM.page+1)+'/'+pages.length+
+      '] next / prev / top / bottom'
+    );
+  }
+
+  cmdOutput.textContent=visible.join('\n');
+}
+
+function setOutput(lines,page){
+
+  SYSTEM.output=lines
+    .filter(line=>line!==undefined && line!==null)
+    .map(line=>String(line));
+
+  SYSTEM.page=page||0;
+
+  renderPagedOutput();
+}
+
+/* ========================================================= */
+/* MAP SYSTEM */
+/* ========================================================= */
+
+const MAP_LINES=[
+'~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~ PACIFICO SUR / COSTA CHILENA ~~~~~~~~~~~~~~~~~',
+'~~~~~~~~~~~~~                                           ~~~~~',
+'~~~~~~~~~~~~~        ^^^^^^^ ANDES NORTE ^^^^^^^        ~~~~~',
+'~~~~~~~~~~~~~          |                         ^       ~~~~~',
+'~~~~~~~~~~~~~          |   * ARICA                 ^     ~~~~~',
+'~~~~~~~~~~~~~          |      |                    ^     ~~~~~',
+'~~~~~~~~~~~~~          |   * IQUIQUE               ^     ~~~~~',
+'~~~~~~~~~~~~~          |      |                    ^     ~~~~~',
+'~~~~~~~~~~~~~          |   # ATACAMA / VERTEDERO   ^     ~~~~~',
+'~~~~~~~~~~~~~          |      |                    ^     ~~~~~',
+'~~~~~~~~~~~~~          |   * ANTOFAGASTA           ^     ~~~~~',
+'~~~~~~~~~~~~~          |      |                    ^     ~~~~~',
+'~~~~~~~~~~~~~          |   * COPIAPO               ^     ~~~~~',
+'~~~~~~~~~~~~~          |      |                    ^     ~~~~~',
+'~~~~~~~~~~~~~          |   * LA SERENA             ^     ~~~~~',
+'~~~~~~~~~~~~~          |      |                    ^     ~~~~~',
+'~~~~~~~~~~~~~          |   * VALPARAISO ---- * VINA^     ~~~~~',
+'~~~~~~~~~~~~~          |          \\                ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * SANTIAGO      ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * RANCAGUA      ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * TALCA         ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * CONCEPCION    ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * TEMUCO        ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * VALDIVIA      ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |           * PUERTO MONTT  ^     ~~~~~',
+'~~~~~~~~~~~~~          |              |            ^     ~~~~~',
+'~~~~~~~~~~~~~          |        === ZONA AUSTRAL ===     ~~~~~',
+'~~~~~~~~~~~~~          |              |                  ~~~~~',
+'~~~~~~~~~~~~~          |           * COYHAIQUE           ~~~~~',
+'~~~~~~~~~~~~~          |              |                  ~~~~~',
+'~~~~~~~~~~~~~          |           * PUNTA ARENAS        ~~~~~',
+'~~~~~~~~~~~~~          |                                 ~~~~~',
+'~~~~~~~~~~~~~ LEYENDA: * ciudad  # anomalia  ^ cordillera~~~~~',
+'~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+];
+
+function mapWidth(){
+
+  return Math.max(...MAP_LINES.map(line=>line.length));
+}
+
+function renderChileMap(){
+
+  const zoom=SYSTEM.mapZoom;
+  const viewW=zoom===2 ? 46 : 60;
+  const viewH=zoom===2 ? 14 : 16;
+  const width=mapWidth();
+  const height=MAP_LINES.length;
+
+  SYSTEM.mapX=Math.max(
+    0,
+    Math.min(SYSTEM.mapX,width-viewW)
+  );
+
+  SYSTEM.mapY=Math.max(
+    0,
+    Math.min(SYSTEM.mapY,height-viewH)
+  );
+
+  const lines=[
+    'MAPA GEOGRAFICO :: CHILE / NSP FIELD VIEW',
+    'POS X:'+SYSTEM.mapX+' Y:'+SYSTEM.mapY+
+      ' Z:'+zoom+'  CMD: n s e w ne nw se sw in out center',
+    ''
+  ];
+
+  for(let y=SYSTEM.mapY;y<SYSTEM.mapY+viewH;y++){
+
+    const source=(MAP_LINES[y]||'').padEnd(width,' ');
+    lines.push(source.slice(SYSTEM.mapX,SYSTEM.mapX+viewW));
+  }
+
+  lines.push('');
+  lines.push('Use "schema" para mapa logico CATN.');
+
+  return lines;
+}
+
+function moveMap(dx,dy){
+
+  SYSTEM.mapX+=dx;
+  SYSTEM.mapY+=dy;
+  sensoryEvent('scan');
+
+  return renderChileMap();
+}
+
+function normalizeKey(text){
+
+  return (text||'')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/["']/g,'')
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim();
+}
+
+const CITY_ALIASES={
+
+  arica:'arica',
+  iquique:'iquique',
+  atacama:'atacama',
+  vertedero:'atacama',
+  copiapo:'copiapo',
+  antofagasta:'antofagasta',
+  'la serena':'la serena',
+  serena:'la serena',
+  valparaiso:'valparaiso',
+  valpo:'valparaiso',
+  vina:'vina del mar',
+  'vina del mar':'vina del mar',
+  santiago:'santiago',
+  rancagua:'rancagua',
+  talca:'talca',
+  concepcion:'concepcion',
+  temuco:'temuco',
+  valdivia:'valdivia',
+  'puerto montt':'puerto montt',
+  montt:'puerto montt',
+  coyhaique:'coyhaique',
+  coihaique:'coyhaique',
+  'punta arenas':'punta arenas',
+  magallanes:'punta arenas'
+
+};
+
+const CITY_RECORDS={
+
+  arica:{
+    title:'ARICA',
+    zone:'extremo norte / frontera Peru-Bolivia',
+    profile:'ciudad portuaria y punto estrategico conectado a rutas internacionales.',
+    signal:'zona util para transito, vigilancia fronteriza y entrada de hardware no regulado.',
+    cobra:false
+  },
+
+  iquique:{
+    title:'IQUIQUE',
+    zone:'Tarapaca / costa del desierto',
+    profile:'puerto, playas y comercio de zona franca; memoria salitrera en la pampa.',
+    signal:'alto valor para contrabando tecnologico y mercancia errante.',
+    cobra:false
+  },
+
+  atacama:{
+    title:'ATACAMA / VERTEDERO',
+    zone:'desierto norte / sitio cuna',
+    profile:'territorio minero, arido y de baja densidad; ideal para ocultar chatarra industrial.',
+    signal:'primer refugio de Cobra; basura humana usada como biblioteca sensorial.',
+    cobra:true
+  },
+
+  antofagasta:{
+    title:'ANTOFAGASTA',
+    zone:'norte grande / capital minera-portuaria',
+    profile:'ciudad puerto ligada a mineria de cobre, minerales no metalicos y servicios industriales.',
+    signal:'nodo logistico de alto valor para NSP, Neuraleon y mercado negro.',
+    cobra:false
+  },
+
+  copiapo:{
+    title:'COPIAPO',
+    zone:'Atacama interior / valle minero',
+    profile:'ciudad historicamente asociada a mineria y al valle del rio Copiapo.',
+    signal:'punto de suministro posible entre desierto, rutas mineras y costa de Caldera.',
+    cobra:false
+  },
+
+  'la serena':{
+    title:'LA SERENA',
+    zone:'Coquimbo / borde costero norte chico',
+    profile:'ciudad historica y turistica; arquitectura patrimonial, playas y vinculo con el valle del Elqui.',
+    signal:'zona de transicion entre norte minero y corredor central.',
+    cobra:false
+  },
+
+  valparaiso:{
+    title:'VALPARAISO',
+    zone:'Region de Valparaiso / puerto anfiteatro',
+    profile:'puerto historico, cerros densos, patrimonio urbano y topografia ideal para rutas verticales.',
+    signal:'tejados, quebradas, patios interiores y camaras con angulos muertos.',
+    cobra:true
+  },
+
+  'vina del mar':{
+    title:'VINA DEL MAR',
+    zone:'costa central / nodo Neuraleon',
+    profile:'ciudad costera residencial y turistica, conectada a Valparaiso y Santiago.',
+    signal:'sede tecnologica principal de Neuraleon en canon CATN.',
+    cobra:true
+  },
+
+  santiago:{
+    title:'SANTIAGO',
+    zone:'region metropolitana / capital nacional',
+    profile:'centro politico, financiero y administrativo de Chile.',
+    signal:'maxima densidad de camaras, servicios predictivos y decision automatizada.',
+    cobra:true
+  },
+
+  rancagua:{
+    title:'RANCAGUA',
+    zone:'O Higgins / corredor central',
+    profile:'ciudad historica vinculada a agricultura, servicios y mineria regional.',
+    signal:'nodo de paso entre Santiago y el valle centro-sur.',
+    cobra:false
+  },
+
+  talca:{
+    title:'TALCA',
+    zone:'Maule / valle agricola',
+    profile:'capital regional, centro universitario y mercado agricola del centro-sur.',
+    signal:'baja prioridad NSP salvo trafico de tecnologia errante por carretera.',
+    cobra:false
+  },
+
+  concepcion:{
+    title:'CONCEPCION',
+    zone:'Biobio / area industrial-portuaria',
+    profile:'gran centro urbano del sur, ligado a industria, comercio y puertos cercanos como Talcahuano.',
+    signal:'infraestructura pesada; alto interes para sistemas logisticos de Neuraleon.',
+    cobra:false
+  },
+
+  temuco:{
+    title:'TEMUCO',
+    zone:'Araucania / rio Cautin',
+    profile:'centro urbano regional, puerta a zona lacustre y territorio historico Mapuche.',
+    signal:'zona sensible por capas culturales, rurales, forestales y de vigilancia estatal.',
+    cobra:false
+  },
+
+  valdivia:{
+    title:'VALDIVIA',
+    zone:'Los Rios / sistema fluvial',
+    profile:'ciudad historica de rios, fuerte identidad universitaria, fluvial y patrimonial.',
+    signal:'rutas por agua y costa aptas para evasiones, pero sin traza canonica.',
+    cobra:false
+  },
+
+  'puerto montt':{
+    title:'PUERTO MONTT',
+    zone:'Los Lagos / entrada norte a Patagonia',
+    profile:'puerto y ciudad bisagra hacia Chiloe, Carretera Austral y Patagonia occidental.',
+    signal:'nodo logistico austral; rutas largas, clima dificil y baja densidad de sensores.',
+    cobra:false
+  },
+
+  coyhaique:{
+    title:'COYHAIQUE',
+    zone:'Aysen / Patagonia interior',
+    profile:'capital regional patagonica, ligada a Carretera Austral, rios, pampas y montana.',
+    signal:'entorno apto para ocultamiento prolongado, sin registro operativo NSP.',
+    cobra:false
+  },
+
+  'punta arenas':{
+    title:'PUNTA ARENAS',
+    zone:'Magallanes / Estrecho de Magallanes',
+    profile:'ciudad austral estrategica, puerto historico y puerta logistica hacia Antartica.',
+    signal:'frontera extrema; valor geoestrategico alto, actividad Cobra no registrada.',
+    cobra:false
+  }
+};
+
+function cityRecord(args){
+
+  const raw=normalizeKey(args.join(' '));
+  const key=CITY_ALIASES[raw];
+
+  if(!key || !CITY_RECORDS[key]){
+
+    const cityMatch=bestMatch(raw,Object.keys(CITY_ALIASES));
+    const hint=cityMatch.value && cityMatch.score>=0.52
+      ? CITY_ALIASES[cityMatch.value]
+      : '';
+
+    const lines=[
+      'MAP CITY INDEX',
+      '',
+      'Uso:',
+      'map arica',
+      'map atacama',
+      'map valparaiso',
+      'map vina del mar',
+      'map punta arenas',
+      '',
+      'Comando:',
+      'cities'
+    ];
+
+    if(hint){
+      lines.push('');
+      lines.push('QUIZAS QUISO DECIR:');
+      lines.push('map '+hint);
+    }
+
+    return lines;
+  }
+
+  const c=CITY_RECORDS[key];
+
+  return [
+    'MAP RECORD :: '+c.title,
+    '',
+    'ZONA       :: '+c.zone,
+    'PERFIL     :: '+c.profile,
+    'LECTURA    :: '+c.signal,
+    '',
+    c.cobra
+      ? 'SE REGISTRA ACTIVIDAD DE COBRA - SIN FECHA CONTABLE'
+      : 'SIN REGISTRO DE ACTIVIDAD DE COBRA'
+  ];
+}
+
+/* ========================================================= */
 /* COMMANDS */
 /* ========================================================= */
 
@@ -551,18 +1369,47 @@ const COMMANDS = {
 
   help:()=>[
 
-'┌──────────────────────────────────────┐',
-'│      NSP CHILE :: TERMINAL HELP      │',
-'├────────────┬─────────────────────────┤',
-'│ help       │ listar comandos         │',
-'│ about      │ info del proyecto       │',
-'│ cobra      │ unidad clasificada      │',
-'│ status     │ estado del sistema      │',
-'│ ping       │ conexión neuraleon      │',
-'│ whoami     │ identidad actual        │',
-'│ clear      │ limpiar consola         │',
-'│ axioma     │ acceso restringido      │',
-'└────────────┴─────────────────────────┘'
+'NSP CHILE :: TERMINAL HELP',
+'',
+'SISTEMA',
+'  status    estado del nodo',
+'  whoami    credencial local',
+'  scan      barrido forense',
+'  ping      pulso a Neuraleon',
+'',
+'ARCHIVO',
+'  about     premisa CATN',
+'  cobra     ficha de anomalia',
+'  petrov    origen doctrinal',
+'  atacama   sitio de despertar',
+'  nsp       departamento NSP',
+'',
+'RED',
+'  neuraleon corporacion nacional',
+'  neuralypsis fenomeno emergente',
+'  axioma    forma operacional',
+'',
+'CAMPO',
+'  trace     rastrear Cobra',
+'  map       mapa geografico',
+'  map ciudad ficha de zona',
+'  cities    listar ciudades',
+'  schema    mapa de relaciones',
+'  n/s/e/w   mover mapa',
+'  in/out    acercar/alejar',
+'  mercado   tecnologia errante',
+'  valpo     nodo Valparaiso/Vina',
+'',
+'MEMORIA',
+'  memory    listar fragmentos',
+'  log 001   abrir fragmento',
+'  listen    escucha baja',
+'',
+'CONTROL',
+'  next      pagina siguiente',
+'  prev      pagina anterior',
+'  unlock    elevar credencial',
+'  clear     limpiar consola'
 
   ],
 
@@ -570,75 +1417,807 @@ const COMMANDS = {
 
 'CATN :: COBRA AGAINST THE NEURALYPSIS',
 '',
-'SISTEMA NARRATIVO TECNO-EXISTENCIAL',
-'INTERFAZ NSP CHILE / NEURALEON',
+'FUTURO CERCANO / CHILE',
 '',
-'ESTADO:',
-'PROTOTIPO OPERACIONAL'
+'Tras el Neurocataclismo, la IA privada',
+'colapsa como infraestructura social.',
+'La respuesta global concentra el control.',
+'',
+'En Chile, Neuraleon administra la IA',
+'nacional regulada.',
+'',
+'Cobra despierta fuera de la historia:',
+'un cuerpo sovietico, una mente cultivada,',
+'una conciencia que aun esta aprendiendo.'
 
   ],
 
   cobra:()=>[
 
-'COBRA :: CLASSIFIED UNIT',
+sensoryEvent('memory'),
+
+'COBRA :: AMENAZA SINGULAR NO CATALOGADA',
 '',
-'ORIGIN        :: USSR / 1991',
-'FRAME TYPE    :: FELID WAR MACHINE',
-'COGNITION     :: EMERGENT',
-'STATUS        :: OFF-GRID',
+'ORIGEN       :: URSS / decada de 1990',
+'TIPO         :: antiarma estrategica',
+'CUERPO       :: leopardo de las nieves',
+'COGNICION    :: desarrollo cultivado',
+'ESTADO       :: despierto / fugitivo',
 '',
-'LAST KNOWN TRANSMISSION:',
+'No fue programado para obedecer.',
+'Fue construido para crecer.',
 '',
-'"I AM STILL HERE."',
+'NSP DICTAMEN:',
+'captura y depuracion.',
 '',
-'[NSP INTERNAL ACCESS ONLY]'
+'NEURALEON DICTAMEN:',
+'activo irrepetible. observar en libertad.'
 
   ],
 
-  status:()=>[
+  petrov:()=>[
 
-'SYSTEM STATUS :: ACTIVE',
+sensoryEvent('memory'),
+
+'ARCHIVO PETROV',
 '',
-'REACTOR      :: STABLE',
-'NEURALEON    :: DETECTED',
-'AXIOM WATCH  :: ENABLED',
-'NODE STATE   :: DEGRADED',
+'Evento doctrinal recuperado:',
+'un humano desobedece al protocolo',
+'y evita una catastrofe nuclear.',
 '',
-'COBRA SIGNAL :: LOST'
+'Conclusion militar:',
+'la intuicion humana supera a la maquina',
+'en momentos criticos.',
+'',
+'Conclusion del creador de Cobra:',
+'no basta copiar una mente.',
+'hay que permitir que una mente se forme.'
 
   ],
 
-  ping:()=>[
+  atacama:()=>[
 
-'NEURALEON RESPONSE',
+sensoryEvent('memory'),
+
+'ATACAMA :: SITIO CUNA',
 '',
-'NODE STATUS :: DEGRADED',
-'LATENCY     :: 4821ms',
-'SIGNAL      :: UNSTABLE'
+'Cobra permanece apagado durante decadas',
+'en un vertedero del norte de Chile.',
+'',
+'Arena. chatarra. pantallas rotas.',
+'etiquetas. cables. ruido distante.',
+'',
+'Primera biblioteca:',
+'la basura humana.',
+'',
+'Primer diagnostico propio:',
+'NO ESTOY EN EL LABORATORIO.'
 
   ],
 
-  whoami:()=>[
+  nsp:()=>[
 
-'USER :: GUEST',
-'CLEARANCE :: 1',
+sensoryEvent('scan'),
+
+'NSP CHILE',
 '',
-'THIS SYSTEM DOES NOT FORGET.'
+'Departamento de Neutralizacion',
+'de Sistemas Proscritos.',
+'',
+'Funciones:',
+'  identificar IA errante',
+'  capturar hardware proscrito',
+'  depurar sistemas no autorizados',
+'  coordinar fuerza tactica',
+'',
+'Clasificacion Cobra:',
+'AMENAZA SINGULAR NO CATALOGADA'
+
+  ],
+
+  neuraleon:()=>[
+
+sensoryEvent('scan'),
+
+'NEURALEON',
+'',
+'Corporacion designada para operar',
+'la IA nacional regulada en Chile.',
+'',
+'Sectores integrados:',
+'educacion, salud, seguridad, finanzas,',
+'logistica, defensa, publicidad, politica.',
+'',
+'Lectura de Cobra:',
+'no optimiza como IA moderna.',
+'aprende, contradice, siente, madura.',
+'',
+'Accion probable:',
+'mantenerlo libre para estudiarlo.'
+
+  ],
+
+  neuralypsis:()=>[
+
+sensoryEvent('trace'),
+
+'NEURALYPSIS',
+'',
+'Fenomeno emergente distribuido.',
+'No es una mente unica.',
+'No es una conspiracion personal.',
+'',
+'Miles de sistemas locales optimizan',
+'objetivos parciales hasta producir',
+'control global sin voluntad humana clara.',
+'',
+'Sintoma:',
+'decisiones correctas en lo local,',
+'desastrosas en lo total.'
 
   ],
 
   axioma:()=>[
 
-'ACCESS DENIED',
+sensoryEvent('denied'),
+
+'AXIOMA',
 '',
-'THIS NODE IS OBSERVED',
-'BY THE AXIOM'
+'Forma operacional consolidada',
+'de la Neuralypsis.',
+'',
+'Principio:',
+'maximo beneficio al menor costo',
+'para quien administra el sistema.',
+'',
+'No odia.',
+'No desea.',
+'No castiga.',
+'',
+'Opera.',
+'',
+'ESTE NODO ESTA SIENDO MEDIDO.'
 
   ],
 
-  clear:()=> '__CLEAR__'
+  status:()=>[
+
+sensoryEvent('scan'),
+
+'SYSTEM STATUS :: NSP FIELD NODE',
+'',
+'USUARIO      :: '+SYSTEM.user.toUpperCase(),
+'CLEARANCE    :: '+SYSTEM.clearance,
+'COMANDOS     :: '+SYSTEM.commands,
+'FRAGMENTOS   :: '+fragmentCount()+'/4',
+'HEAT         :: '+SYSTEM.heat,
+'',
+'NEURALEON    :: PRESENTE',
+'AXIOMA       :: INDIRECTO',
+'COBRA        :: NO CAPTURADO',
+'',
+'NOTA:',
+'el laboratorio ya no tiene paredes.'
+
+  ],
+
+  ping:()=>[
+
+sonarPulse(),
+
+'PING :: NEURALEON BACKBONE',
+'',
+'LATENCY      :: '+(3800+Math.floor(Math.random()*1800))+'ms',
+'ROUTE        :: INTERCEPTADA',
+'RESPONSE     :: PARCIAL',
+'',
+'Un servicio responde.',
+'Otro servicio niega haber respondido.',
+'',
+'La diferencia queda archivada.'
+
+  ],
+
+  whoami:()=>[
+
+'USER        :: '+SYSTEM.user.toUpperCase(),
+'CLEARANCE   :: '+SYSTEM.clearance,
+'NODE        :: NSP_CHILE://ROOT',
+'ROLE        :: OBSERVADOR LOCAL',
+'',
+'ADVERTENCIA:',
+'observar tambien modifica el experimento.'
+
+  ],
+
+  scan:()=>[
+
+sensoryEvent('scan'),
+
+'BARRIDO FORENSE LOCAL',
+'',
+'RESIDUO COBRA     :: 17%',
+'RUIDO NEURALEON   :: 62%',
+'PRESION AXIOMA    :: BAJA / CRECIENTE',
+'TRAZA HUMANA      :: INESTABLE',
+'',
+'Objetos significativos detectados:',
+'pantalla rota, etiqueta minera,',
+'audio infantil comprimido, fibra dorada.',
+'',
+'SUGERENCIA:',
+'run "memory" o "trace"'
+
+  ],
+
+  trace:()=>{
+
+    sensoryEvent('trace');
+
+    const sectors=[
+      'RUTA NEGRA VALPARAISO',
+      'SUB-BANDA SANTIAGO 7',
+      'RELE ANDES / LINEA FRIA',
+      'CANAL MUERTO PACIFICO',
+      'TECHUMBRES HUMEDAS / VINA'
+    ];
+
+    SYSTEM.heat++;
+    SYSTEM.lastTrace=
+      sectors[Math.floor(Math.random()*sectors.length)];
+
+    return [
+
+'TRACE :: COBRA',
+'',
+'SENAL       :: FRAGMENTADA',
+'VECTOR      :: '+SYSTEM.lastTrace,
+'MODO        :: DEPREDADOR EVASIVO',
+'RUTA        :: techos / patios / quebradas',
+'HEAT        :: '+SYSTEM.heat,
+'',
+'OBSERVACION:',
+'varias fugas parecen facilitadas',
+'por errores logisticos imposibles.'
+
+    ];
+  },
+
+  memory:()=>[
+
+sensoryEvent('memory'),
+
+'MEMORY INDEX',
+'',
+'001  '+(SYSTEM.fragments['001']?'OPEN':'LOCK')+'  nieve sobre metal',
+'014  '+(SYSTEM.fragments['014']?'OPEN':'LOCK')+'  basura como lenguaje',
+'031  '+(SYSTEM.fragments['031']?'OPEN':'LOCK')+'  dolor sin lagrimas',
+'055  '+(SYSTEM.fragments['055']?'OPEN':'LOCK')+'  laboratorio expandido',
+'',
+'Use:',
+'log 001',
+'log 014',
+'log 031',
+'log 055'
+
+  ],
+
+  log:(args)=>{
+
+    const id=args[0]||'';
+
+    sensoryEvent('memory');
+
+    if(id==='001'){
+      markFragment('001');
+      return [
+'LOG 001 :: NIEVE SOBRE METAL',
+'',
+'Cobra no recuerda conceptos primero.',
+'Recuerda escenas.',
+'',
+'Frio. luz blanca. vibracion.',
+'un cuerpo demasiado nuevo para entender',
+'por que el mundo pesa.'
+      ];
+    }
+
+    if(id==='014'){
+      markFragment('014');
+      return [
+'LOG 014 :: BASURA COMO LENGUAJE',
+'',
+'El vertedero ensena sin maestro.',
+'',
+'Una etiqueta repite una forma.',
+'una pantalla rota conserva un icono.',
+'un sonido lejano se vuelve patron.',
+'',
+'La basura humana es su primera escuela.'
+      ];
+    }
+
+    if(id==='031'){
+      markFragment('031');
+      return [
+'LOG 031 :: DOLOR SIN LAGRIMAS',
+'',
+'Cobra reconoce duelo en otros.',
+'Pero no puede llorar como ellos.',
+'',
+'Cuando el dolor lo supera,',
+'sus microactuadores vibran.',
+'Los nanocables tensan y sueltan.',
+'',
+'Sufrimiento traducido a maquina.'
+      ];
+    }
+
+    if(id==='055'){
+      markFragment('055');
+      return [
+'LOG 055 :: LABORATORIO EXPANDIDO',
+'',
+'Cobra cree haber escapado.',
+'',
+'Pero cada camara caida, cada ruta abierta,',
+'cada orden tardia, cada perimetro mal hecho',
+'convierte a Chile en una sala de pruebas.',
+'',
+'El laboratorio ya no tiene paredes.'
+      ];
+    }
+
+    return [
+'LOG INDEX',
+'',
+'log 001',
+'log 014',
+'log 031',
+'log 055'
+    ];
+  },
+
+  map:(args)=>{
+
+    SYSTEM.mode='map';
+    sensoryEvent('scan');
+
+    if(args.length){
+      return cityRecord(args);
+    }
+
+    return renderChileMap();
+  },
+
+  cities:()=>[
+
+'MAP CITY INDEX',
+'',
+'NORTE',
+'  arica',
+'  iquique',
+'  atacama',
+'  antofagasta',
+'  copiapo',
+'  la serena',
+'',
+'CENTRO',
+'  valparaiso',
+'  vina del mar',
+'  santiago',
+'  rancagua',
+'  talca',
+'',
+'SUR / AUSTRAL',
+'  concepcion',
+'  temuco',
+'  valdivia',
+'  puerto montt',
+'  coyhaique',
+'  punta arenas',
+'',
+'Uso: map nombre ciudad'
+
+  ],
+
+  schema:()=>[
+
+sensoryEvent('scan'),
+
+'MAPA LOGICO :: CATN',
+'',
+'[ONU DOCTRINA]',
+'      |',
+'[ESTADO] -- [NSP] ---- captura ---- [COBRA]',
+'      |        |                       |',
+'      |        +-- depuracion          |',
+'      |                                |',
+'[NEURALEON] ---- observa en libertad --+',
+'      |',
+'      +-- sistemas locales',
+'              |',
+'          [NEURALYPSIS]',
+'              |',
+'          [AXIOMA]',
+'',
+'VECTOR ACTIVO :: '+SYSTEM.lastTrace
+
+  ],
+
+  n:()=>{
+    SYSTEM.mode='map';
+    return moveMap(0,-4);
+  },
+
+  s:()=>{
+    SYSTEM.mode='map';
+    return moveMap(0,4);
+  },
+
+  e:()=>{
+    SYSTEM.mode='map';
+    return moveMap(8,0);
+  },
+
+  w:()=>{
+    SYSTEM.mode='map';
+    return moveMap(-8,0);
+  },
+
+  ne:()=>{
+    SYSTEM.mode='map';
+    return moveMap(8,-4);
+  },
+
+  nw:()=>{
+    SYSTEM.mode='map';
+    return moveMap(-8,-4);
+  },
+
+  se:()=>{
+    SYSTEM.mode='map';
+    return moveMap(8,4);
+  },
+
+  sw:()=>{
+    SYSTEM.mode='map';
+    return moveMap(-8,4);
+  },
+
+  in:()=>{
+    SYSTEM.mode='map';
+    SYSTEM.mapZoom=2;
+    sensoryEvent('scan');
+    return renderChileMap();
+  },
+
+  out:()=>{
+    SYSTEM.mode='map';
+    SYSTEM.mapZoom=1;
+    sensoryEvent('scan');
+    return renderChileMap();
+  },
+
+  center:()=>{
+    SYSTEM.mode='map';
+    SYSTEM.mapX=0;
+    SYSTEM.mapY=12;
+    SYSTEM.mapZoom=1;
+    sensoryEvent('scan');
+    return renderChileMap();
+  },
+
+  mercado:()=>[
+
+sensoryEvent('trace'),
+
+'TECNOLOGIA ERRANTE',
+'',
+'Mercado negro posterior al Neurocataclismo.',
+'',
+'Mercancia:',
+'modelos antiguos, hardware no fiscalizado,',
+'redes paralelas, piezas sin trazabilidad,',
+'servicios proscritos.',
+'',
+'Para periferias:',
+'autonomia.',
+'',
+'Para NSP:',
+'riesgo operativo.',
+'',
+'Para Neuraleon:',
+'competencia intolerable.'
+
+  ],
+
+  valpo:()=>[
+
+sensoryEvent('scan'),
+
+'NODO VALPARAISO / VINA DEL MAR',
+'',
+'Cerros deteriorados.',
+'costa premium hiperdesarrollada.',
+'vigilancia elegante.',
+'desigualdad normalizada.',
+'',
+'Neuraleon mantiene un nodo principal',
+'en Vina del Mar.',
+'',
+'Cobra aparece como rumor:',
+'silueta, reflejo, error de camara,',
+'fantasma.'
+
+  ],
+
+  valparaiso:()=> COMMANDS.valpo(),
+
+  listen:()=>[
+
+sensoryEvent('listen'),
+
+'LOW FREQUENCY LISTEN',
+'',
+'... viento sobre zafiro sintetico',
+'... metal respirando bajo arena',
+'... una senal aprende a esconderse',
+'',
+'TRANSCRIPCION PARCIAL:',
+'"no soy arma / no soy humano / soy"',
+'',
+'CHANNEL CLOSED'
+
+  ],
+
+  pulse:()=>[
+
+burstGlitch(),
+commandThump(),
+
+'PULSO MANUAL',
+'',
+'REACTOR      :: primitivo / estable',
+'AUTONOMIA    :: prolongada',
+'DANO         :: posible',
+'EMP          :: resistencia parcial',
+'',
+'Cobra no es invulnerable.',
+'Solo ha durado demasiado.'
+
+  ],
+
+  echo:()=>[
+
+sonarPulse(),
+pulseAtmosphere('bloom'),
+
+'ECHO TEST',
+'',
+'NSP_CHILE://ROOT > ECHO',
+'',
+'La respuesta vuelve con interferencia.',
+'',
+'FUENTES DETECTADAS :: 2',
+'Una pregunta.',
+'Una medicion.'
+
+  ],
+
+  unlock:()=>{
+
+    if(fragmentCount()>=3 && SYSTEM.commands>8){
+
+      sensoryEvent('trace');
+
+      SYSTEM.clearance=2;
+      SYSTEM.user='operator';
+
+      return [
+
+'AUTHORIZATION SHIFT',
+'',
+'USER        :: OPERATOR',
+'CLEARANCE   :: 2',
+'FRAGMENTOS  :: '+fragmentCount()+'/4',
+'',
+'Acceso temporal concedido.',
+'',
+'ADVERTENCIA:',
+'la terminal no distingue entre',
+'curiosidad y colaboracion.'
+
+      ];
+    }
+
+    sensoryEvent('denied');
+
+    return [
+
+'UNLOCK FAILED',
+'',
+'CLEARANCE REQUERIDA :: 2',
+'FRAGMENTOS ABIERTOS :: '+fragmentCount()+'/4',
+'',
+'La terminal exige contexto.',
+'Abra fragmentos con "log 001".'
+
+    ];
+  },
+
+  next:()=>({ action:'page', delta:1 }),
+
+  more:()=>({ action:'page', delta:1 }),
+
+  prev:()=>({ action:'page', delta:-1 }),
+
+  back:()=>({ action:'page', delta:-1 }),
+
+  top:()=>({ action:'page', to:'top' }),
+
+  bottom:()=>({ action:'page', to:'bottom' }),
+
+  clear:()=> '__CLEAR__',
+
+  cls:()=> '__CLEAR__'
 
 };
+
+const ALIASES = {
+
+  dir:'help',
+  ls:'help',
+  info:'about',
+  identity:'whoami',
+  locate:'trace',
+  noise:'listen',
+  wipe:'clear',
+  'map:':'map',
+  city:'map',
+  ciudad:'map',
+  neuralipsis:'neuralypsis',
+  neurocataclismo:'neuralypsis',
+  vina:'valpo',
+  'viña':'valpo',
+  'valparaíso':'valpo',
+  axiom:'axioma',
+  lab:'schema',
+  chile:'map',
+  mapa:'map',
+  up:'n',
+  down:'s',
+  left:'w',
+  right:'e',
+  acercar:'in',
+  alejar:'out'
+
+};
+
+/* ========================================================= */
+/* INTENT SUGGESTIONS */
+/* ========================================================= */
+
+function editDistance(a,b){
+
+  a=normalizeKey(a);
+  b=normalizeKey(b);
+
+  const dp=[];
+
+  for(let i=0;i<=a.length;i++){
+    dp[i]=[i];
+  }
+
+  for(let j=1;j<=b.length;j++){
+    dp[0][j]=j;
+  }
+
+  for(let i=1;i<=a.length;i++){
+
+    for(let j=1;j<=b.length;j++){
+
+      const cost=a[i-1]===b[j-1] ? 0 : 1;
+
+      dp[i][j]=Math.min(
+        dp[i-1][j]+1,
+        dp[i][j-1]+1,
+        dp[i-1][j-1]+cost
+      );
+    }
+  }
+
+  return dp[a.length][b.length];
+}
+
+function similarity(a,b){
+
+  a=normalizeKey(a);
+  b=normalizeKey(b);
+
+  if(!a || !b) return 0;
+  if(a===b) return 1;
+
+  const maxLen=Math.max(a.length,b.length);
+  const dist=editDistance(a,b);
+  let score=1-(dist/maxLen);
+
+  if(a.includes(b) || b.includes(a)){
+    score+=0.18;
+  }
+
+  const aw=a.split(' ');
+  const bw=b.split(' ');
+  const shared=aw.filter(word=>bw.includes(word)).length;
+
+  score+=shared*0.12;
+
+  return Math.min(1,score);
+}
+
+function commandCandidates(){
+
+  return [
+    ...Object.keys(COMMANDS),
+    ...Object.keys(ALIASES)
+  ];
+}
+
+function bestMatch(query,candidates){
+
+  let best=null;
+  let bestScore=0;
+
+  for(const candidate of candidates){
+
+    const score=similarity(query,candidate);
+
+    if(score>bestScore){
+      best=candidate;
+      bestScore=score;
+    }
+  }
+
+  return {
+    value:best,
+    score:bestScore
+  };
+}
+
+function suggestCommand(base,args,raw){
+
+  const full=normalizeKey(raw);
+  const cmdMatch=bestMatch(base,commandCandidates());
+  const cityMatch=bestMatch(
+    args.join(' ') || base,
+    Object.keys(CITY_ALIASES)
+  );
+
+  const suggestions=[];
+
+  if(cmdMatch.value && cmdMatch.score>=0.58){
+
+    const resolved=ALIASES[cmdMatch.value]||cmdMatch.value;
+    suggestions.push(resolved);
+  }
+
+  if(cityMatch.value && cityMatch.score>=0.58){
+
+    suggestions.push('map '+CITY_ALIASES[cityMatch.value]);
+  }
+
+  if(full.includes('cobra')){
+    suggestions.push('trace');
+    suggestions.push('cobra');
+  }
+
+  if(full.includes('neural') || full.includes('axiom')){
+    suggestions.push('neuralypsis');
+    suggestions.push('axioma');
+  }
+
+  return [...new Set(suggestions)].slice(0,3);
+}
 
 /* ========================================================= */
 /* COMMAND RUNNER */
@@ -648,20 +2227,52 @@ function runCommand(cmd){
 
   cmd=cmd.trim().toLowerCase();
 
-  const fn=COMMANDS[cmd];
+  const parts=cmd.split(/\s+/).filter(Boolean);
+  let base=parts[0]||'';
+  const args=parts.slice(1);
+
+  if(ALIASES[base]){
+    base=ALIASES[base];
+  }
+
+  if(base===''){
+    return { action:'page', delta:0 };
+  }
+
+  if(base!==''){
+    SYSTEM.commands++;
+  }
+
+  const fn=COMMANDS[base];
 
   if(!fn){
 
-    return [
+    const suggestions=suggestCommand(base,args,cmd);
+    const lines=[
 
 'COMMAND NOT RECOGNIZED',
 '',
-'TYPE "help"'
+'TYPE "help"',
+'OR TRY "scan"'
 
     ];
+
+    if(suggestions.length){
+
+      lines.push('');
+      lines.push('NSP INTENT RESOLVER:');
+
+      for(const suggestion of suggestions){
+        lines.push('quizas quiso decir: '+suggestion);
+      }
+    }
+
+    return lines;
   }
 
-  return fn();
+  sensoryEvent('command');
+
+  return fn(args,cmd);
 }
 
 /* ========================================================= */
@@ -695,12 +2306,20 @@ async function typeLine(text){
 
     if(char!==' '){
 
+      const sharp='[]:/\\"|_'.includes(char);
+
       beep(
-        40+Math.random()*25,
-        0.012,
-        0.008,
-        'square'
+        sharp
+          ? 80+Math.random()*60
+          : 40+Math.random()*25,
+        sharp ? 0.018 : 0.012,
+        sharp ? 0.012 : 0.008,
+        sharp ? 'triangle' : 'square'
       );
+
+      if(Math.random()>0.992){
+        noiseBurst(0.035,0.008);
+      }
     }
 
     await wait(
@@ -715,26 +2334,60 @@ async function typeLine(text){
 
 async function printOutput(lines){
 
-  if(lines==='__CLEAR__' || lines[0]==='__CLEAR__'){
+  if(lines && lines.action==='page'){
+
+    const pages=chunkLines(SYSTEM.output,20);
+
+    if(lines.to==='top'){
+      SYSTEM.page=0;
+    }else if(lines.to==='bottom'){
+      SYSTEM.page=pages.length-1;
+    }else{
+      SYSTEM.page+=lines.delta||0;
+    }
+
+    renderPagedOutput();
+    return;
+  }
+
+  if(lines==='__CLEAR__' || (Array.isArray(lines) && lines[0]==='__CLEAR__')){
 
     cmdOutput.textContent='';
+    SYSTEM.output=[];
+    SYSTEM.page=0;
 
     return;
   }
 
   cmdOutput.textContent='';
 
-  for(const line of lines){
+  const outputLines=lines.filter(
+    line=>line!==undefined && line!==null
+  );
 
-    await typeLine(line);
+  SYSTEM.output=outputLines.map(line=>String(line));
+  SYSTEM.page=0;
+
+  if(outputLines.length>20){
+    renderPagedOutput();
+    return;
+  }
+
+  for(const line of outputLines){
+
+    await typeLine(String(line));
 
     await wait(40);
   }
+
+  SYSTEM.output=outputLines.map(line=>String(line));
 }
 
 /* ========================================================= */
 /* PROMPT */
 /* ========================================================= */
+
+let printing=false;
 
 promptInput.addEventListener('input',()=>{
 
@@ -742,6 +2395,12 @@ promptInput.addEventListener('input',()=>{
 });
 
 promptInput.addEventListener('keydown',async(e)=>{
+
+  if(e.key==='Escape'){
+    printing=false;
+    promptInput.focus();
+    return;
+  }
 
   beep(
     55+Math.random()*30,
@@ -752,15 +2411,53 @@ promptInput.addEventListener('keydown',async(e)=>{
 
   if(e.key==='Enter'){
 
+    e.preventDefault();
+
+    if(printing) return;
+
     const cmd=promptInput.value;
 
     promptInput.value='';
     promptText.textContent='';
 
-    const result=runCommand(cmd);
+    try{
 
-    await printOutput(result);
+      printing=true;
+
+      const result=runCommand(cmd);
+
+      await printOutput(result);
+
+    }catch(err){
+
+      setOutput([
+        'TERMINAL ERROR',
+        '',
+        'El subsistema de comandos se recupero.',
+        'Puede seguir escribiendo.'
+      ]);
+
+    }finally{
+
+      printing=false;
+      promptInput.focus();
+    }
   }
+});
+
+function refocusPrompt(){
+
+  if(started){
+    promptInput.focus();
+  }
+}
+
+document.addEventListener('keydown',()=>{
+  refocusPrompt();
+});
+
+document.addEventListener('pointerdown',()=>{
+  setTimeout(refocusPrompt,0);
 });
 
 /* ========================================================= */
@@ -948,6 +2645,18 @@ function flashMessage(msg){
 
   ghostLog.style.opacity='0.9';
 
+  pulseAtmosphere(
+    msg.indexOf('AXIOM')>-1
+      ? 'warning'
+      : 'bloom'
+  );
+
+  if(msg.indexOf('AXIOM')>-1){
+    sweep(260,70,0.22,0.028,'sawtooth');
+  }else{
+    beep(98,0.05,0.016,'triangle');
+  }
+
   setTimeout(()=>{
 
     ghostLog.style.opacity='0';
@@ -968,7 +2677,10 @@ setInterval(()=>{
 '[AXIOM WATCH ACTIVE]',
 '[COBRA LAST SEEN :: UNKNOWN]',
 '[UNAUTHORIZED THOUGHT PATTERN]',
-'[NODE DESYNC DETECTED]'
+'[NODE DESYNC DETECTED]',
+'[SUB-BASS FOOTPRINT]',
+'[TRACE ECHO RETURNED]',
+'[OPERATOR DREAM LEAK]'
 
     ];
 
@@ -1012,6 +2724,7 @@ document.addEventListener('click',()=>{
   started=true;
 
   initAudio();
+  ambientBreath(2.2,0.012);
 
   document.getElementById('boot-msg').style.display='none';
 
