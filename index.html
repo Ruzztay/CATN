@@ -34,20 +34,26 @@
       color:rgba(0,255,65,0.65); font-size:28px; letter-spacing:0.22em; z-index:200;
       animation:blink 1.3s step-end infinite;
     }
+
+    /* ── Prompt line ── */
     #prompt-line {
       position:absolute; display:none; align-items:center; z-index:200;
       font-size:100px; color:rgba(0,255,65,0.85); white-space:nowrap;
+      /* ancho máximo hasta el borde del canvas para no desbordar */
       max-width:2400px; overflow:hidden;
     }
     #prompt-prefix { color:rgba(0,255,65,0.55); margin-right:0.2em; flex-shrink:0; }
     #prompt-text   {
+      /* texto visible; crece hacia la derecha y se recorta */
       color:rgba(0,255,65,0.85); font-family:'Courier New',monospace;
       font-size:inherit; letter-spacing:0.05em;
       overflow:hidden; white-space:nowrap;
+      /* mostrar siempre el extremo derecho (donde se escribe) */
       direction:ltr; text-align:left;
       min-width:0;
     }
     #prompt-input {
+      /* input real invisible; captura el teclado */
       position:absolute; opacity:0; pointer-events:none;
       width:1px; height:1px; left:-9999px;
     }
@@ -56,12 +62,15 @@
       margin-left:2px; vertical-align:middle; animation:blink 1s step-end infinite;
       flex-shrink:0;
     }
+
+    /* ── Área de output de comandos ── */
     #cmd-output {
       position:absolute; z-index:200; display:none;
       font-size:52px; color:rgba(0,255,65,0.75);
       font-family:'Courier New',monospace; letter-spacing:0.04em;
       line-height:1.55; white-space:pre;
     }
+
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
   </style>
 </head>
@@ -139,115 +148,163 @@
     o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
   }
 
-  /* ── COMANDOS ACTUALIZADOS ── */
+  /* ── Comandos ── */
   const COMMANDS = {
     help: () => [
-      '┌────────────────── :: CATN HELP :: ──────────────────┐',
-      '│ help       │ Muestra esta lista de ayuda            │',
-      '│ about      │ Información del proyecto CATN          │',
-      '│ status     │ Estado vital del sistema y red         │',
-      '│ scan       │ Escaneo de nodos de red Neuraleon      │',
-      '│ logs       │ Accede a fragmentos de memoria         │',
-      '│ time       │ Muestra la hora y fecha del sistema    │',
-      '│ echo <txt> │ Replica el texto ingresado             │',
-      '│ clear      │ Limpia la pantalla de la terminal      │',
-      '│ exit       │ Termina la sesión actual               │',
-      '└─────────────────────────────────────────────────────┘'
+      '┌─────────────────────────────────────────────┐',
+      '│           CATN :: COMANDOS DISPONIBLES       │',
+      '├──────────────┬──────────────────────────────┤',
+      '│  help        │  Lista de comandos            │',
+      '│  about       │  Sobre este proyecto          │',
+      '│  cobra       │  Info sobre Cobra             │',
+      '│  status      │  Estado del sistema           │',
+      '│  whoami      │  Identificación de usuario    │',
+      '│  clear       │  Limpiar pantalla             │',
+      '└──────────────┴──────────────────────────────┘',
     ],
     about: () => [
       '  CATN — Cobra: Against the Neuralypsis',
-      '  Proyecto de ciencia ficción bajo control tecnocrático.',
-      '  [ESTADO: PROTOTIPO ACTIVO]'
+      '  Proyecto de ciencia ficción ambientado en un',
+      '  futuro cercano bajo control tecnocrático.',
+      '  Primera fase de interfaz activa.',
+      '  [Estado: PROTOTIPO — Fase I]',
+    ],
+    cobra: () => [
+      '  COBRA :: Unidad Clasificada — Origen: URSS ~1991',
+      '  Tipo     : Mecha antropomórfico / Leopardo de las nieves',
+      '  Estado   : Activo — Localización desconocida',
+      '  Cognición: Emergente — No programada, cultivada',
+      '  Amenaza  : No catalogada',
+      '  [ACCESO RESTRINGIDO — NSP CHILE]',
     ],
     status: () => [
-      '  Reactor: ESTABLE | Red Neuraleon: DETECTADA',
-      '  Axioma: MONITOREANDO | Cobra: SIN SEÑAL'
+      '  SISTEMA CATN v0.1 — TERMINAL ACTIVA',
+      '  Reactor    : ESTABLE',
+      '  Red Neuraleon : DETECTADA',
+      '  NSP Chile  : ALERTA ACTIVA',
+      '  Axioma     : MONITOREANDO',
+      '  Cobra      : ████████ SIN SEÑAL',
     ],
-    scan: () => [
-      '  Escaneando red Neuraleon...',
-      '  [OK] Nodo Central - 127.0.0.1',
-      '  [??] Entrada Cifrada - 192.168.0.42',
-      '  [!!] Intrusión detectada en subnivel 4.'
+    whoami: () => [
+      '  USUARIO NO IDENTIFICADO',
+      '  Acceso provisional concedido.',
+      '  Este sistema no olvida.',
     ],
-    logs: () => [
-      '  [LOG_01]: Interferencia detectada en el sector 7.',
-      '  [LOG_02]: Los servidores de Axioma no responden.',
-      '  [LOG_03]: Confirmado: El núcleo de Cobra ha despertado.'
-    ],
-    time: () => [
-      '  FECHA: ' + new Date().toLocaleDateString(),
-      '  HORA : ' + new Date().toLocaleTimeString()
-    ],
-    echo: (args) => [ '  > ' + (args || 'Nada que repetir.') ],
     clear: () => '__CLEAR__',
-    exit: () => [ '  TERMINANDO SESIÓN...', '  CONEXIÓN CERRADA. ADIÓS.' ],
-    whoami: () => [ '  USUARIO NO IDENTIFICADO. ACCESO PROVISIONAL.' ]
   };
 
-  const bootMsg=document.getElementById('boot-msg');
-  const promptLine=document.getElementById('prompt-line');
-  const promptInput=document.getElementById('prompt-input');
-  const promptText=document.getElementById('prompt-text');
-  const cmdOutput=document.getElementById('cmd-output');
+  function runCommand(cmd){
+    cmd = cmd.trim().toLowerCase();
+    const fn = COMMANDS[cmd];
+    if(!fn){ return ['  Comando no reconocido: "'+cmd+'"','  Escribe  help  para ver los comandos disponibles.']; }
+    return fn();
+  }
 
-  let active=false;
-  window.addEventListener('click',()=>{
-    if(active) return; active=true;
-    initAudio(); bootMsg.style.display='none';
-    state.forEach(s=>{
-      s.interval=setInterval(()=>{ refreshCol(s); if(Math.random()<0.03) beep(200+Math.random()*400,0.05,0.02); },100);
-    });
-    setTimeout(()=>unlock(0),1000);
-  });
+  /* ── Output de comandos ── */
+  let outputTop = 0; // se calcula cuando la animación termina
+  const cmdOutput = document.getElementById('cmd-output');
 
-  function unlock(idx){
-    if(idx>=COLS){
-      setTimeout(showTerminal,800);
-      return;
+  function printOutput(lines){
+    if(lines === '__CLEAR__' || lines[0] === '__CLEAR__'){
+      cmdOutput.textContent=''; return;
     }
-    state[idx].locked=true;
-    clearInterval(state[idx].interval);
-    refreshCol(state[idx]);
-    beep(800,0.2,0.1,'sine');
-    setTimeout(()=>unlock(idx+1),500);
+    cmdOutput.textContent = lines.join('\n');
   }
 
-  function showTerminal(){
-    promptLine.style.display='flex';
-    promptLine.style.left=SL0+'px';
-    promptLine.style.top=(FT0+CELL+40)+'px';
-    cmdOutput.style.display='block';
-    cmdOutput.style.left=SL0+'px';
-    cmdOutput.style.top=(FT0+CELL+200)+'px';
-    promptInput.focus();
-  }
+  /* ── Prompt interactivo ── */
+  const promptLine   = document.getElementById('prompt-line');
+  const promptText   = document.getElementById('prompt-text');
+  const promptInput  = document.getElementById('prompt-input');
 
-  window.addEventListener('keydown',()=>{ if(active) promptInput.focus(); });
-
-  promptInput.addEventListener('input',()=>{ promptText.textContent=promptInput.value; });
-
-  promptInput.addEventListener('keydown',(e)=>{
+  promptInput.addEventListener('input', ()=>{
+    promptText.textContent = promptInput.value;
+  });
+  promptInput.addEventListener('keydown', (e)=>{
+    beep(55+Math.random()*30, 0.06, 0.04, 'sawtooth');
     if(e.key==='Enter'){
-      const val=promptInput.value;
-      promptInput.value=''; promptText.textContent='';
-      if(val.trim()){
-        beep(400,0.1,0.05);
-        handleCommand(val);
-      }
+      const cmd = promptInput.value;
+      promptInput.value='';
+      promptText.textContent='';
+      const result = runCommand(cmd);
+      printOutput(result);
     }
   });
 
-  function handleCommand(rawCmd){
-    const parts = rawCmd.trim().split(' ');
-    const cmdKey = parts[0].toLowerCase();
-    const args = parts.slice(1).join(' ');
-    
-    const fn = COMMANDS[cmdKey];
-    if(fn){
-      const res = fn(args);
-      if(res==='__CLEAR__'){
-        cmdOutput.textContent='';
-      } else {
-        cmdOutput.textContent = res.join('\n') + '\n\n' + cmdOutput.textContent;
+  /* ── Animación de salida ── */
+  function startExit(){
+    const STEPS_UP=4, STEPS_LEFT=6, STEPS=STEPS_LEFT;
+    let barTop=FT0, stTop=ST0, stLeft=SL0;
+    let pLeft=SL0+GW+Math.round(CELL*0.35);
+    let step=0;
+
+    const tick=setInterval(()=>{
+      step++;
+      if(step<=STEPS_UP){
+        barTop-=CELL; focusBar.style.top=barTop+'px';
+        stTop -=CELL; stage.style.top=stTop+'px';
+        promptLine.style.top=(barTop+CELL/2)+'px';
       }
-    } else {
+      stLeft-=CELL; stage.style.left=stLeft+'px';
+      pLeft -=CELL; promptLine.style.left=pLeft+'px';
+      beep(Math.max(28,70-step*4),0.12,0.06,'sawtooth');
+      if(step>=STEPS){
+        clearInterval(tick);
+        // posicionar output debajo de la barra final
+        const outTop = barTop + CELL + 20;
+        cmdOutput.style.top    = outTop+'px';
+        cmdOutput.style.left   = pLeft+'px';
+        cmdOutput.style.display= 'block';
+        promptInput.focus();
+      }
+    },120);
+  }
+
+  /* ── Mostrar prompt ── */
+  function showPrompt(){
+    promptLine.style.left      =(SL0+GW+Math.round(CELL*0.35))+'px';
+    promptLine.style.top       =(FT0+CELL/2)+'px';
+    promptLine.style.transform ='translateY(-50%)';
+    promptLine.style.display   ='flex';
+    setTimeout(startExit, 400);
+  }
+
+  /* ── Lock ── */
+  let locked=0;
+  function lockCol(s){
+    s.locked=true; clearInterval(s.interval);
+    for(let r=0;r<ROWS;r++){
+      cells[s.ci][r].className='cell '+cls(r,true);
+      cells[s.ci][r].textContent=(r===CR)?TARGET[s.ci]:rnd();
+    }
+    beep(55+s.ci*10,0.5,0.07,'sawtooth');
+    if(++locked===COLS){
+      setTimeout(()=>{
+        beep(55,0.6,0.08,'sawtooth');
+        setTimeout(()=>beep(82,0.5,0.07,'sawtooth'),200);
+        setTimeout(()=>beep(110,0.7,0.06,'sawtooth'),400);
+        setTimeout(showPrompt,900);
+      },300);
+    }
+  }
+
+  /* ── Run col ── */
+  function runCol(s){
+    let t=0; const stop=60+s.ci*30+Math.floor(Math.random()*20);
+    s.interval=setInterval(()=>{
+      t++; s.offset=(s.offset+1)%ROWS; refreshCol(s);
+      if(Math.random()>0.78) beep(30+Math.random()*40,0.04,0.012,'sawtooth');
+      if(t>=stop) lockCol(s);
+    },48+s.ci*15);
+  }
+
+  /* ── Click para iniciar ── */
+  let started=false;
+  document.addEventListener('click',()=>{
+    if(started) return; started=true; initAudio();
+    document.getElementById('boot-msg').style.display='none';
+    state.forEach((s,i)=>setTimeout(()=>runCol(s),i*130));
+  });
+})();
+</script>
+</body>
+</html>
