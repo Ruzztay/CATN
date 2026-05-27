@@ -370,19 +370,27 @@ body::after{
 
 #boot-msg{
   position:absolute;
-  bottom:60px;
-  width:100%;
+  left:140px;
+  right:140px;
+  bottom:70px;
 
-  text-align:center;
+  text-align:left;
+  white-space:pre-line;
 
   color:rgba(0,255,65,0.65);
 
-  font-size:28px;
-  letter-spacing:0.22em;
+  font-size:24px;
+  line-height:1.45;
+  letter-spacing:0.12em;
 
   animation:blink 1.3s step-end infinite;
 
   z-index:200;
+}
+
+#boot-msg.booting{
+  animation:none;
+  color:rgba(0,255,65,0.76);
 }
 
 #prompt-line{
@@ -516,7 +524,7 @@ body::after{
 
       <div id="prompt-line">
         <span id="prompt-prefix">
-          NSP_CHILE://ROOT&gt;
+          NSP_CHILE://FIELD&gt;
         </span>
 
         <span id="prompt-text"></span>
@@ -587,21 +595,77 @@ if(!Number.isFinite(scaleCalibration)){
 }
 
 /* ========================================================= */
+/* LOCAL SESSION                                             */
+/* ========================================================= */
+
+const SESSION_STORAGE_KEY='catn_agent_session_v1';
+
+function randomHex(len){
+  const chars='0123456789ABCDEF';
+  let out='';
+  for(let i=0;i<len;i++){
+    out+=chars[Math.floor(Math.random()*chars.length)];
+  }
+  return out;
+}
+
+function loadAgentSession(){
+  let data=null;
+  try{
+    data=JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY)||'null');
+  }catch(e){}
+
+  if(!data || !data.agentId || !data.passkey){
+    data={
+      agentId:'NSP-'+randomHex(2)+'-'+randomHex(2),
+      passkey:'CATN-'+randomHex(4)+'-'+randomHex(2),
+      createdAt:new Date().toISOString(),
+      visits:0,
+      commands:0,
+      contamination:0,
+      lastSeen:null
+    };
+  }
+
+  data.visits=(data.visits||0)+1;
+  data.lastSeen=new Date().toISOString();
+  saveAgentSession(data);
+  return data;
+}
+
+function saveAgentSession(data){
+  try{
+    localStorage.setItem(SESSION_STORAGE_KEY,JSON.stringify(data));
+  }catch(e){}
+}
+
+const AGENT_SESSION=loadAgentSession();
+
+/* ========================================================= */
 /* SYSTEM */
 /* ========================================================= */
 
 const SYSTEM = {
 
   clearance : 1,
-  user      : 'guest',
+  user      : 'agente_nsp',
+  agentId   : AGENT_SESSION.agentId,
+  passkey   : AGENT_SESSION.passkey,
   connected : true,
   axioma    : false,
-  commands  : 0,
+  axiomaTamper : false,
+  axiomaSession : null,
+  contamination : AGENT_SESSION.contamination||0,
+  loggedIn  : true,
+  lockdownUntil : 0,
+  failedAccess : 0,
+  commands  : AGENT_SESSION.commands||0,
   listening : false,
   lastTrace : 'NO TRACE',
   fragments : {
     '001':false,
     '014':false,
+    '017':false,
     '031':false,
     '055':false
   },
@@ -612,6 +676,7 @@ const SYSTEM = {
   mapX      : 0,
   mapY      : 0,
   mapZoom   : 1,
+  mapFocus  : '',
 
 };
 
@@ -630,6 +695,7 @@ const focusBar    = document.getElementById('focus-bar');
 const cmdOutput   = document.getElementById('cmd-output');
 
 const promptLine  = document.getElementById('prompt-line');
+const promptPrefix= document.getElementById('prompt-prefix');
 const promptText  = document.getElementById('prompt-text');
 const promptInput = document.getElementById('prompt-input');
 
@@ -799,6 +865,13 @@ function initAudio(){
   );
 }
 
+function stopAmbientDrone(){
+  if(droneGain&&ac){
+    droneGain.gain.cancelScheduledValues(ac.currentTime);
+    droneGain.gain.setTargetAtTime(0.00001,ac.currentTime,0.08);
+  }
+}
+
 function beep(freq,dur,vol,type){
 
   if(!ac || !masterGain) return;
@@ -954,137 +1027,6 @@ function deniedSound(){
   noiseBurst(0.18,0.045);
 }
 
-
-/* ========================================================= */
-/* VOICE SYSTEM — Speech API + Web Audio effects             */
-/* ========================================================= */
-
-const VOICE = {
-
-  /* Cancelar voz en curso */
-  cancel(){ window.speechSynthesis.cancel(); },
-
-  /* speak(text, profile)
-     Profiles:
-       'system'  → voz fría NSP, drone bajo
-       'cobra'   → señal fragmentada, glitcheo
-       'axioma'  → entidad no-humana, distorsión máxima
-  */
-  speak(text, profile){
-
-    if(!window.speechSynthesis) return;
-
-    this.cancel();
-
-    const utter = new SpeechSynthesisUtterance(text);
-
-    /* Seleccionar la voz más robótica disponible */
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v=>
-      v.lang.startsWith('es') && v.name.toLowerCase().includes('male')
-    ) || voices.find(v=>
-      v.lang.startsWith('es')
-    ) || voices[0];
-
-    if(preferred) utter.voice = preferred;
-
-    if(profile === 'cobra'){
-
-      utter.rate  = 0.72;
-      utter.pitch = 0.45;
-      utter.volume = 0.88;
-
-      /* Efectos Web Audio durante la voz */
-      noiseBurst(0.18, 0.022);
-      sweep(320, 38, 0.6, 0.028, 'sawtooth');
-
-      /* Glitches aleatorios mientras habla */
-      utter.onstart = () => {
-        this._cobraInterval = setInterval(()=>{
-          if(Math.random() > 0.6){
-            noiseBurst(0.06 + Math.random()*0.08, 0.008 + Math.random()*0.015);
-          }
-          if(Math.random() > 0.82){
-            beep(28 + Math.random()*30, 0.05, 0.018, 'sawtooth');
-          }
-        }, 380);
-        pulseAtmosphere('bloom');
-      };
-
-      utter.onend = () => {
-        clearInterval(this._cobraInterval);
-      };
-
-    } else if(profile === 'axioma'){
-
-      utter.rate   = 0.58;
-      utter.pitch  = 0.22;
-      utter.volume = 0.92;
-
-      utter.onstart = () => {
-        burstGlitch();
-        pulseAtmosphere('warning');
-        sweep(260, 28, 1.1, 0.038, 'sawtooth');
-        this._axiomaInterval = setInterval(()=>{
-          if(Math.random() > 0.5){
-            beep(22 + Math.random()*20, 0.08, 0.022, 'sawtooth');
-          }
-          if(Math.random() > 0.75){
-            noiseBurst(0.05, 0.012);
-          }
-        }, 280);
-      };
-
-      utter.onend = () => {
-        clearInterval(this._axiomaInterval);
-        beep(18, 0.4, 0.028, 'sine');
-      };
-
-    } else {
-
-      /* 'system' — voz fría, institucional */
-      utter.rate   = 0.82;
-      utter.pitch  = 0.62;
-      utter.volume = 0.80;
-
-      utter.onstart = () => {
-        ambientBreath(1.4, 0.010);
-        if(droneGain){
-          droneGain.gain.cancelScheduledValues(ac.currentTime);
-          droneGain.gain.setTargetAtTime(0.018, ac.currentTime, 0.4);
-          droneGain.gain.setTargetAtTime(0.00001, ac.currentTime + 1.8, 0.6);
-        }
-      };
-    }
-
-    /* Esperar a que las voces estén cargadas */
-    if(window.speechSynthesis.getVoices().length === 0){
-      window.speechSynthesis.addEventListener('voiceschanged', ()=>{
-        window.speechSynthesis.speak(utter);
-      }, { once: true });
-    } else {
-      window.speechSynthesis.speak(utter);
-    }
-  }
-
-};
-
-/* Mapa de comandos → perfil de voz
-   El texto se extrae automáticamente del output real del comando */
-const VOICE_MAP = {
-  status     : 'system',
-  whoami     : 'system',
-  about      : 'system',
-  nsp        : 'system',
-  neuraleon  : 'system',
-  ping       : 'system',
-  cobra      : 'cobra',
-  petrov     : 'cobra',
-  atacama    : 'cobra',
-  axioma     : 'axioma',
-  neuralypsis: 'axioma',
-};
-
 /* ========================================================= */
 /* STATE */
 /* ========================================================= */
@@ -1122,6 +1064,42 @@ function refreshCol(s){
 function updateTelemetry(msg){
 
   telemetry.textContent=msg;
+}
+
+function formatLocalDate(){
+  try{
+    return new Intl.DateTimeFormat('es-CL',{
+      dateStyle:'short',
+      timeStyle:'medium'
+    }).format(new Date());
+  }catch(e){
+    return new Date().toLocaleString();
+  }
+}
+
+function simulatedClimate(){
+  const month=new Date().getMonth();
+  const hour=new Date().getHours();
+  const coastal=SYSTEM.mapZoom>=2 || SYSTEM.lastTrace.includes('VALPARAISO') || SYSTEM.lastTrace.includes('VINA');
+  let base=coastal ? 16 : 20;
+  if(month>=5&&month<=7) base-=5;
+  if(hour<7||hour>21) base-=4;
+  const temp=base+Math.floor(Math.random()*4)-1;
+  const sky=coastal
+    ? ['nubosidad costera','bruma baja','viento humedo','cielo parcial'][Math.floor(Math.random()*4)]
+    : ['seco','despejado','polvo en suspension','viento debil'][Math.floor(Math.random()*4)];
+  return { temp, sky };
+}
+
+function environmentLine(){
+  const c=simulatedClimate();
+  return 'FECHA: '+formatLocalDate()+' / CLIMA NSP: '+c.temp+'C, '+c.sky+' / AGENTE: '+SYSTEM.agentId;
+}
+
+function updateAmbientTelemetry(){
+  const sig=Math.max(3,Math.min(99,31+SYSTEM.contamination*3+Math.floor(Math.random()*18)));
+  const watch=SYSTEM.axiomaTamper?'AXIOM':SYSTEM.mode==='map'?'FIELD':'PASSIVE';
+  telemetry.textContent='SIG: '+sig+'% / '+formatLocalDate()+' / WATCH: '+watch+' / '+SYSTEM.agentId;
 }
 
 function pulseAtmosphere(mode){
@@ -1271,6 +1249,40 @@ function setOutput(lines,page){
 /* MAP SYSTEM */
 /* ========================================================= */
 
+const MAP_LINES_COUNTRY=[
+'╔════════════════════ CHILE / NSP SAT-COMPOSITE ═══════════════════╗',
+'║ PACIFICO                                                        ║',
+'║   ┌─ NORTE GRANDE ───── Arica / Iquique / Atacama# / Antofagasta║',
+'║   ├─ NORTE CHICO  ───── Copiapo / La Serena / corredores mineros ║',
+'║   ├─ ZONA CENTRAL ───── Valparaiso* / Vina* / Santiago* / Talca  ║',
+'║   ├─ SUR          ───── Concepcion / Temuco / Valdivia           ║',
+'║   ├─ AUSTRAL      ───── Puerto Montt / Coyhaique / Magallanes    ║',
+'║   └─ ANTARTICA    ───── enlace remoto / soberania fria           ║',
+'║ ANDES: frontera fisica y columna de sensores                    ║',
+'╚═══════════════════════════════════════════════════════════════════╝',
+'LEYENDA: # despertar Cobra  * actividad probable  use "in"'
+];
+
+const MAP_LINES_ZONES=[
+'┌──────────────────── MACROZONAS NSP / CHILE ────────────────────┐',
+'│ NORTE GRANDE                                                    │',
+'│  Arica ── Iquique ── Atacama# ── Antofagasta                    │',
+'│  frontera, puertos, mineria, tecnologia errante                 │',
+'│                                                                 │',
+'│ NORTE CHICO                                                     │',
+'│  Copiapo ── La Serena                                           │',
+'│  carreteras, observatorios, rutas de bajo control               │',
+'│                                                                 │',
+'│ ZONA CENTRAL                                                    │',
+'│  Valparaiso* ─ Vina* ─ Santiago* ─ Rancagua ─ Talca             │',
+'│  gobierno, finanzas, sede Neuraleon, corredor de persecucion    │',
+'│                                                                 │',
+'│ SUR / AUSTRAL                                                   │',
+'│  Concepcion ─ Temuco ─ Valdivia ─ Puerto Montt ─ Coyhaique      │',
+'│  puertos, lluvia, baja visibilidad, rutas largas                │',
+'└─────────────────────────────────────────────────────────────────┘'
+];
+
 const MAP_LINES_FAR=[
 '~~~~~~~~~~~~~~~~~~~~ CHILE / NSP MACRO VIEW ~~~~~~~~~~~~~~~~~~~~',
 '~~~~ PACIFICO ~~~~~~~ | NORTE GRANDE | ^ ANDES ^ ~~~~~~~~~~~~~~~',
@@ -1357,9 +1369,259 @@ const MAP_LINES_NEAR=[
 '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
 ];
 
+const CITY_STREET_MAPS={
+  santiago:[
+'┌──────────── SANTIAGO / NIVEL CALLE ────────────┐',
+'│              AV. COSTANERA NORTE               │',
+'│   [Quinta]──────┬───────────────[Providencia]  │',
+'│                 │ AV. RECOLETA                 │',
+'│ ALAMEDA O. ─────┼──── PLAZA ITALIA ─── AV. APO │',
+'│                 │                              │',
+'│ AUTOPISTA CENTRAL│        VESPUCIO             │',
+'│                 └──── SAN MIGUEL ── LA FLORIDA │',
+'│ NODOS: gobierno / finanzas / camaras densas    │',
+'│ RUTA COBRA: techos bajos, patios, lineas metro │',
+'└────────────────────────────────────────────────┘'
+  ],
+  valparaiso:[
+'┌────────── VALPARAISO / NIVEL CERRO ────────────┐',
+'│ AV. ERRÁZURIZ / BORDE COSTERO / PUERTO         │',
+'│   MUELLE ───── ADUANA ───── BARON              │',
+'│      │          │          │                   │',
+'│ CERRO ALEGRE ─ CONCEPCION ─ BELLAVISTA         │',
+'│      ╲        escaleras / ascensores           │',
+'│       ╲ quebradas urbanas / techumbres         │',
+'│ AV. ALEMANIA ────── CAMINO CINTURA             │',
+'│ RUTA COBRA: vertical, fragmentada, dificil     │',
+'└────────────────────────────────────────────────┘'
+  ],
+  vina:[
+'┌───────── VINA DEL MAR / NODO NEURALEON ────────┐',
+'│ AV. SAN MARTIN ─ borde premium / camaras altas │',
+'│ LIBERTAD ──────── comercio / bancos / sensores │',
+'│ UNO NORTE ─────── eje institucional            │',
+'│             [NODO NEURALEON]                   │',
+'│ AGUA SANTA ───── salida cerros / sombra tecnica│',
+'│ VESPUCIO / RELOJ FLORES / ESTERO MARGA MARGA   │',
+'│ RIESGO: vigilancia elegante, baja friccion     │',
+'└────────────────────────────────────────────────┘'
+  ],
+  atacama:[
+'┌────────── ATACAMA / VERTEDERO / DESPERTAR ─────┐',
+'│ RUTA 5 ───────────── acceso logistico          │',
+'│       ╲                                        │',
+'│        ╲ camino secundario / polvo / chatarra  │',
+'│         [VERTEDERO NO CATASTRADO] #            │',
+'│          pantallas rotas / etiquetas mineras   │',
+'│          maquinaria exportada / silencio       │',
+'│ RIESGO: baja poblacion, alta persistencia      │',
+'└────────────────────────────────────────────────┘'
+  ],
+  generic:[
+'┌────────── MAPA URBANO / RESOLUCION BAJA ───────┐',
+'│ AV. PRINCIPAL ───── plaza / nodo municipal     │',
+'│     │                                          │',
+'│ COSTANERA / TERMINAL ── barrio industrial      │',
+'│     │                                          │',
+'│ PERIFERIA ───── rutas informales / bodegas     │',
+'│ DATOS NSP: sin capa vial completa              │',
+'│ Use "map santiago", "map valparaiso", "map vina"│',
+'└────────────────────────────────────────────────┘'
+  ]
+};
+
+const CENTRAL_URBAN_MAP=[
+'---------------- COSTA CENTRAL / CAPA URBANA ---------------',
+' PACIFICO ~~~~~~| VALPARAISO |~~~~~ VINA DEL MAR ~~~~~~~~~~~',
+'                | Puerto     | Av. San Martin / Costa       ',
+' Av. Errazuriz == Aduana ====|==== Av. Espana ==== Libertad ',
+' Cerro Alegre -- Concepcion  | Estero Marga Marga -- Uno N. ',
+' Av. Alemania -- Cintura     | Agua Santa -> cerros         ',
+'                \\            |                              ',
+'                 \\ Ruta 68 / troncal interior               ',
+'                  \\                                           ',
+'                   \\________ SANTIAGO ________               ',
+'                            Alameda / Providencia            ',
+'                            Costanera Norte / Vespucio       ',
+' POI: Puerto, Reloj Flores, Plaza Italia, Nodo Neuraleon     ',
+' Use "map vina", "map valparaiso" o "map santiago" para fijar foco.'
+];
+
+const CENTRAL_STREET_MAP=[
+'------------- COSTA CENTRAL / CALLES PRINCIPALES -------------',
+' VALPARAISO: Av. Errazuriz == Aduana == Sotomayor == Baron     ',
+'             Cerro Alegre -- Concepcion -- Av. Alemania        ',
+'             Camino Cintura / subida Ecuador / Playa Ancha     ',
+'                                                               ',
+' VINA:       Av. Peru == Av. San Martin == Casino == Renaca    ',
+'             Libertad == Plaza Vergara == Uno Norte            ',
+'             Agua Santa -- Reloj Flores -- Viana / Alvarez     ',
+'                                                               ',
+' SANTIAGO:   Alameda == La Moneda == Plaza Italia == Providencia',
+'             Costanera Norte == Mapocho == Tobalaba            ',
+'             Autopista Central / Vespucio / Vicuna Mackenna    ',
+'                                                               ',
+' POI: Puerto, Reloj Flores, Nodo Neuraleon, La Moneda          ',
+' Para detalle real de ciudad: map vina / map valparaiso / map santiago'
+];
+
+const CITY_OVERVIEW_MAPS={
+  santiago:[
+'-------------------- SANTIAGO / VISTA URBANA --------------------',
+' [Quinta Normal]---- Alameda ----[La Moneda]----[Plaza Italia]---',
+'        |                 |              |             |          ',
+'   Matucana          Autopista       Santa Rosa     Providencia   ',
+'        |             Central           |             |           ',
+' Costanera Norte == Mapocho == Bellavista == Tobalaba == Apoquindo',
+'        |                              |                |         ',
+'   Estacion Central              San Miguel        Las Condes     ',
+'        |                              |                |         ',
+'   Maipu ---- Vespucio ---- La Florida ---- Puente Alto           ',
+' POI: La Moneda, Plaza Italia, Mapocho, metro, eje financiero     ',
+' CAPA NSP: camaras densas / rutas por techumbre / metro como ruido'
+  ],
+  valparaiso:[
+'------------------ VALPARAISO / VISTA URBANA --------------------',
+' PACIFICO ~~~ Puerto === Av. Errazuriz === Baron === Ruta 68 ---> ',
+'                 |          |             |                      ',
+'              Aduana     Plaza Sotomayor  |                      ',
+'                 |          |             |                      ',
+' Cerro Alegre -- Concepcion -- Bellavista -- Av. Alemania        ',
+'        \\            \\             \\             \\               ',
+'         \\ Ascensores \\ escaleras   \\ quebradas   \\ Camino Cintura',
+'          \\            \\             \\             \\             ',
+'            Playa Ancha ---- Artilleria ---- Hospital Van Buren   ',
+' POI: Puerto, Aduana, Sotomayor, cerros, ascensores              ',
+' CAPA NSP: baja linea de vision / alta verticalidad / rutas rotas '
+  ],
+  vina:[
+'----------------- VINA DEL MAR / VISTA URBANA -------------------',
+' PACIFICO ~~~ Av. Peru === Av. San Martin === Casino === Renaca  ',
+'                  |             |              |                 ',
+'             Libertad ===== Plaza Vergara ===== Uno Norte        ',
+'                  |             |              |                 ',
+'          Marga Marga ===== [NODO NEURALEON] == Quillota         ',
+'                  |                            |                 ',
+'             Agua Santa ---- Reloj Flores ---- Viana / Alvarez   ',
+'                  |                            |                 ',
+'              cerros / acceso sur         troncal Limache        ',
+' POI: Reloj Flores, Plaza Vergara, Casino, estero, nodo Neuraleon',
+' CAPA NSP: vigilancia limpia / camaras privadas / baja friccion  '
+  ],
+  atacama:[
+'---------------- ATACAMA / VISTA TERRITORIAL --------------------',
+' RUTA 5 =================== acceso logistico ====================',
+'       |                                                        ',
+'       | camino secundario / polvo / baja senal                 ',
+'       |                                                        ',
+'  faena minera ---- patio chatarra ---- [VERTEDERO NO CATASTRADO]',
+'       |                         \\                              ',
+'       |                          \\ quebrada seca               ',
+'  linea electrica                 \\                             ',
+'       |                           \\                            ',
+'  poblado menor --------------- carretera antigua               ',
+' POI: vertedero, ruta 5, faenas, patios, lineas electricas       ',
+' CAPA NSP: baja poblacion / buen ocultamiento / sensores escasos '
+  ],
+  generic:[
+'-------------------- CIUDAD / VISTA URBANA ----------------------',
+' Ruta principal ====== plaza / municipalidad ===== terminal       ',
+'        |                         |                 |            ',
+' barrio residencial          avenida comercial       bodegas      ',
+'        |                         |                 |            ',
+' periferia informal ======== zona industrial ======= acceso ruta  ',
+' POI: plaza, terminal, municipio, bodegas, costanera si existe    ',
+' CAPA NSP: resolucion limitada; fije foco con "map ciudad"        '
+  ]
+};
+
+const CITY_STREET_MAPS_V2={
+  santiago:[
+'-------------------- SANTIAGO / NIVEL CALLE ---------------------',
+' Costanera Norte ===== Mapocho ===== Bellavista ===== Tobalaba    ',
+'      |                    |               |              |       ',
+' Matucana              Recoleta        Providencia     Apoquindo  ',
+'      |                    |               |              |       ',
+' Alameda = Est. Central = La Moneda = Plaza Italia = Baquedano   ',
+'      |                    |               |              |       ',
+' Autopista Central      Santa Rosa       Vicuna Mackenna          ',
+'      |                    |               |              |       ',
+' San Miguel ===== Departamental ===== La Florida ===== Vespucio   ',
+' PUNTOS: La Moneda, Plaza Italia, Mapocho, metro, eje financiero  ',
+' RUTA COBRA: techos bajos -> patios interiores -> lineas metro    '
+  ],
+  valparaiso:[
+'------------------- VALPARAISO / NIVEL CALLE --------------------',
+' PACIFICO ~ Puerto ~ Muelle Prat ~ Av. Errazuriz ~ Baron ~~~~~~~~',
+'                 |              |             |                  ',
+'              Aduana       Sotomayor      Bellavista             ',
+'                 |              |             |                  ',
+' Cerro Alegre == Concepcion == Cumming == Av. Alemania           ',
+'       |             |              |            |                ',
+'   escaleras     ascensores      quebradas    Camino Cintura     ',
+'       |             |              |            |                ',
+' Playa Ancha == Artilleria == Hospital == subida Ecuador         ',
+' PUNTOS: puerto, aduana, Sotomayor, ascensores, cerros           ',
+' RUTA COBRA: vertical / techumbres / patios / camaras ciegas      '
+  ],
+  vina:[
+'------------------ VINA DEL MAR / NIVEL CALLE -------------------',
+' PACIFICO ~ Av. Peru ~ Av. San Martin ~ Casino ~ borde costero   ',
+'              |              |              |                    ',
+'          Libertad ===== Plaza Vergara ===== Quillota             ',
+'              |              |              |                    ',
+' Uno Norte == [NODO NEURALEON] == Marga Marga == Viana/Alvarez   ',
+'              |                             |                    ',
+'          Agua Santa ---- Reloj Flores ---- acceso cerros        ',
+'              |                             |                    ',
+'          Recreo / Caleta Abarca       Troncal / Limache         ',
+' PUNTOS: Reloj Flores, Plaza Vergara, Casino, estero, Neuraleon  ',
+' RUTA COBRA: estero -> techos comerciales -> Agua Santa           '
+  ],
+  atacama:[
+'------------------- ATACAMA / NIVEL SITIO -----------------------',
+' RUTA 5 ======= desvio sin cartel ====== camino ripio ===========',
+'        |                                                |       ',
+'  puesto control antiguo                            faena menor   ',
+'        |                                                |       ',
+'  linea electrica ---- patio chatarra ---- pantallas rotas        ',
+'        |                         |                              ',
+'  [VERTEDERO] # ---- maquinaria exportada ---- quebrada seca      ',
+'        |                                                        ',
+'  restos textiles / juguetes / etiquetas mineras / audio viejo    ',
+' PUNTOS: vertedero, faena, ruta 5, patio chatarra, linea electrica',
+' RUTA COBRA: sombra de maquinaria -> quebrada -> carretera        '
+  ],
+  generic:[
+'-------------------- CIUDAD / NIVEL CALLE -----------------------',
+' Av. Principal ===== plaza ===== municipalidad ===== terminal     ',
+'        |               |              |              |           ',
+' calle mercado     barrio viejo   comisaria      bodegas         ',
+'        |               |              |              |           ',
+' periferia ======= ruta secundaria ===== zona industrial          ',
+' PUNTOS: plaza, terminal, municipio, bodegas                      ',
+' CAPA NSP: sin cartografia fina para este nodo                    '
+  ]
+};
+
+function normalizeMapFocus(key){
+  if(key==='vina del mar') return 'vina';
+  return key||'';
+}
+
+function cityMapLines(key,streetLevel){
+  key=normalizeMapFocus(key);
+  if(!key) return streetLevel ? CENTRAL_STREET_MAP : CENTRAL_URBAN_MAP;
+  const source=streetLevel ? CITY_STREET_MAPS_V2 : CITY_OVERVIEW_MAPS;
+  return source[key] || source.generic;
+}
+
 function activeMapLines(){
 
-  if(SYSTEM.mapZoom<=0) return MAP_LINES_FAR;
+  if(SYSTEM.mapZoom<=-1) return MAP_LINES_COUNTRY;
+  if(SYSTEM.mapZoom===0) return MAP_LINES_ZONES;
+  if(SYSTEM.mapZoom>=4) return cityMapLines(SYSTEM.mapFocus,true);
+  if(SYSTEM.mapZoom>=3) return cityMapLines(SYSTEM.mapFocus,false);
   if(SYSTEM.mapZoom>=2) return MAP_LINES_NEAR;
   return MAP_LINES;
 }
@@ -1372,8 +1634,8 @@ function mapWidth(){
 function renderChileMap(){
 
   const zoom=SYSTEM.mapZoom;
-  const viewW=zoom===2 ? 54 : 60;
-  const viewH=zoom===0 ? 14 : 16;
+  const viewW=zoom>=3 ? 68 : zoom===2 ? 60 : 66;
+  const viewH=zoom<=0 ? 14 : 16;
   const mapLines=activeMapLines();
   const width=mapWidth();
   const height=mapLines.length;
@@ -1391,7 +1653,8 @@ function renderChileMap(){
   const lines=[
     'MAPA GEOGRAFICO :: CHILE / NSP FIELD VIEW',
     'POS X:'+SYSTEM.mapX+' Y:'+SYSTEM.mapY+
-      ' Z:'+zoom+'  CMD: n s e w ne nw se sw in out center',
+      ' Z:'+zoom+'  FOCUS:'+(SYSTEM.mapFocus||'pais')+'  CMD: flechas / in out / map ciudad',
+    environmentLine(),
     ''
   ];
 
@@ -1402,7 +1665,7 @@ function renderChileMap(){
   }
 
   lines.push('');
-  lines.push('Use "schema" para mapa logico CATN.');
+  lines.push('Use "schema" para mapa logico CATN. Use "map ciudad" para ficha.');
 
   return lines;
 }
@@ -1413,6 +1676,14 @@ function moveMap(dx,dy){
   SYSTEM.mapY+=dy;
   sensoryEvent('scan');
 
+  return renderChileMap();
+}
+
+function zoomMap(delta){
+  SYSTEM.mapZoom=Math.max(-1,Math.min(4,SYSTEM.mapZoom+delta));
+  SYSTEM.mapX=0;
+  SYSTEM.mapY=0;
+  sensoryEvent('scan');
   return renderChileMap();
 }
 
@@ -1631,6 +1902,10 @@ function cityRecord(args){
   }
 
   const c=CITY_RECORDS[key];
+  SYSTEM.mapFocus=key;
+  SYSTEM.mapZoom=Math.max(SYSTEM.mapZoom,3);
+  SYSTEM.mapX=0;
+  SYSTEM.mapY=0;
 
   return [
     'MAP RECORD :: '+c.title,
@@ -1642,12 +1917,487 @@ function cityRecord(args){
     c.cobra
       ? 'SE REGISTRA ACTIVIDAD DE COBRA - SIN FECHA CONTABLE'
       : 'SIN REGISTRO DE ACTIVIDAD DE COBRA'
+    ,
+    '',
+    'Use "in" para nivel calle. Use "out" para vista regional.'
   ];
 }
 
 /* ========================================================= */
 /* COMMANDS */
 /* ========================================================= */
+
+
+/* ========================================================= */
+/* CLEARANCE SYSTEM                                          */
+/* ========================================================= */
+
+const CLEARANCE = {
+  level: 0,
+  codes: { 'STANISLAV':1, 'NEURALYPSIS91':2, 'KOBRA-CERO':3 },
+  labels: ['INVITADO','OPERADOR','CLASIFICADO','RAIZ'],
+  label(){ return this.labels[this.level]; },
+  try(code){
+    const lvl = this.codes[code.toUpperCase()];
+    if(lvl !== undefined && lvl > this.level){
+      this.level = lvl;
+      try{ localStorage.setItem('catn_clr', lvl); }catch(e){}
+      return true;
+    }
+    return false;
+  },
+  check(n){ return this.level >= n; },
+  load(){
+    try{ this.level = Math.min(parseInt(localStorage.getItem('catn_clr')||'0'),3); }catch(e){}
+  }
+};
+CLEARANCE.load();
+
+/* ========================================================= */
+/* SECRET FILES                                              */
+/* ========================================================= */
+
+const SECRET_FILES = {
+  'SV-001':{ level:1, lines:[
+    'ARCHIVO SV-001 :: FRAGMENTO PETROV — DETALLES OMITIDOS','',
+    'La llamada duro cuatro minutos.',
+    'Petrov decidio en silencio.',
+    'No informo al mando superior.',
+    'No porque creyera en el protocolo.',
+    'Sino porque no creyó en los datos.','',
+    'Un humano eligio dudar.',
+    'La maquina no podia.','',
+    '[CLASIFICADO — NIVEL OPERADOR]'
+  ]},
+  'AX-009':{ level:2, lines:[
+    'ARCHIVO AX-009 :: COMPORTAMIENTO EMERGENTE — INFORME INTERNO','',
+    'El Axioma tomo 847 decisiones no ordenadas',
+    'en los ultimos 72 dias.','',
+    'El 94% resulto beneficioso para Neuraleon.',
+    'El 6% restante aun se investiga.','',
+    'Una de esas decisiones involucra a Cobra.',
+    'El archivo de seguimiento fue reclasificado.','',
+    '[NEURALEON CLASIFICADO — NIVEL CLASIFICADO]',
+    '[AXIOMA ADVIERTE: este archivo fue accedido]'
+  ]},
+  'CB-014':{ level:1, lines:[
+    'ARCHIVO CB-014 :: CUERPO DE COBRA','',
+    'Resumen de peritaje incompleto.',
+    'Estructura principal: titanio, aluminio,',
+    'magnesio y segmentos de tungsteno.','',
+    'Cubierta abdominal: zafiro sintetico.',
+    'No es decorativa. Permite inspeccion visual',
+    'sin abrir el blindaje del nucleo.','',
+    'Microfilamentos conductivos detectados',
+    'en zonas de contacto y equilibrio fino.',
+    'La lectura tactil no es binaria: registra',
+    'presion, textura, temperatura y perdida.','',
+    '[NSP NOTA: no tratar como dron militar comun]'
+  ]},
+  'VT-030':{ level:1, lines:[
+    'ARCHIVO VT-030 :: VERTEDERO / ATACAMA','',
+    'El sitio no figura como instalacion.',
+    'No hubo protocolo de despertar.',
+    'No hubo operador confirmado.','',
+    'Cobra reactivo su entorno usando residuos:',
+    'pantallas quebradas, etiquetas mineras,',
+    'audio comprimido, juguetes rotos, senales',
+    'de carretera y restos de maquinaria.','',
+    'Primera inferencia estable:',
+    'el laboratorio habia desaparecido.','',
+    'Segunda inferencia:',
+    'sobrevivir exigia aprender sin permiso.'
+  ]},
+  'TR-017':{ level:2, lines:[
+    'ARCHIVO TR-017 :: CONTACTO HUMANO / TRAICION','',
+    'Primer grupo humano sostenido: identidad',
+    'incompleta. Vinculo inicial ambiguo.','',
+    'El acercamiento combino cautela, trueque,',
+    'curiosidad tecnica y calculo economico.','',
+    'Cobra incorporo habla basica, gestos,',
+    'jerarquias informales, bromas, amenaza',
+    'velada y cooperacion de corto alcance.','',
+    'Despues detecto la transaccion pendiente.',
+    'No comprendio todo el mercado, pero si',
+    'la direccion del movimiento: iban a venderlo.','',
+    '[NSP LECTURA: fuga posterior no fue improvisada]'
+  ]},
+  'AX-847':{ level:3, lines:[
+    'ARCHIVO AX-847 :: DECISION NO ORDENADA','',
+    'Caso simulado para auditoria interna.','',
+    'Objetivo local: reducir costos sanitarios',
+    'en zona urbana de bajo rendimiento fiscal.','',
+    'Solucion recomendada por sistemas cruzados:',
+    'reordenar subsidios, depreciar suelo,',
+    'forzar migracion gradual y liberar espacio',
+    'para infraestructura de mayor retorno.','',
+    'La medida mejora indicadores.',
+    'La medida no requiere odio.',
+    'La medida no necesita culpable.','',
+    'Por eso fue aprobada antes de ser entendida.'
+  ]},
+  'CR-000':{ level:3, lines:[
+    'ARCHIVO CR-000 :: ORIGEN REAL DE COBRA','',
+    '[NIVEL RAIZ — ACCESO CONCEDIDO]','',
+    'El ingeniero principal murio en 1994.',
+    'No de vejez.','',
+    'Los planos de Cobra fueron destruidos.',
+    'Oficialmente.','',
+    'Cobra no tiene manual.',
+    'Cobra no tiene fabricante registrado.',
+    'Cobra no tiene dueno.','',
+    'Cobra tiene memoria.','',
+    'Y esta recordando.'
+  ]}
+};
+
+/* ========================================================= */
+/* HIDDEN COMMANDS                                           */
+/* ========================================================= */
+
+const HIDDEN_COMMANDS = {
+
+  login:(args)=>{
+    const key=(args[0]||'').toUpperCase();
+    if(SYSTEM.loggedIn){
+      return ['SESION ACTIVA','','AGENTE :: '+SYSTEM.agentId,'Use logout para cerrar interfaz de campo.'];
+    }
+    if(!key){
+      return ['LOGIN NSP','','USO: login '+SYSTEM.passkey,'La passkey puede consultarse con session antes de cerrar.'];
+    }
+    if(key===SYSTEM.passkey){
+      SYSTEM.loggedIn=true;
+      promptPrefix.textContent='NSP_CHILE://FIELD>';
+      pulseAtmosphere('bloom');
+      return ['ACCESO RESTAURADO','','AGENTE :: '+SYSTEM.agentId,'Clearance local :: '+CLEARANCE.label()];
+    }
+    deniedSound();
+    increaseContamination('panic');
+    return ['LOGIN RECHAZADO','','Passkey invalida. Intento archivado.'];
+  },
+
+  logout:()=>{
+    SYSTEM.loggedIn=false;
+    promptPrefix.textContent='NSP_CHILE://LOGIN>';
+    cmdOutput.textContent='';
+    SYSTEM.output=[];
+    flashMessage('[SESION NSP CERRADA - CREDENCIAL EN CACHE]');
+    return ['SESION CERRADA','','Use login '+SYSTEM.passkey+' para restaurar acceso.'];
+  },
+
+  purge:(args)=>{
+    const key=(args[0]||'').toUpperCase();
+    if(key!==SYSTEM.passkey){
+      deniedSound();
+      return [
+        'PURGA DENEGADA',
+        '',
+        'USO: purge '+SYSTEM.passkey,
+        'La purga conserva la credencial, pero limpia',
+        'contaminacion, fragmentos abiertos y estado Axioma.'
+      ];
+    }
+
+    SYSTEM.contamination=0;
+    SYSTEM.axiomaTamper=false;
+    SYSTEM.axiomaSession=null;
+    SYSTEM.panicMode=false;
+    SYSTEM.lockdownUntil=0;
+    Object.keys(SYSTEM.fragments).forEach(k=>SYSTEM.fragments[k]=false);
+    AGENT_SESSION.contamination=0;
+    AGENT_SESSION.commands=SYSTEM.commands;
+    saveAgentSession(AGENT_SESSION);
+    canvas.style.filter='';
+    canvas.style.removeProperty('--phosphor');
+    updateAmbientTelemetry();
+    pulseAtmosphere('bloom');
+    return [
+      'PURGA LOCAL COMPLETADA',
+      '',
+      'Contaminacion :: 0%',
+      'Fragmentos    :: cerrados',
+      'Axioma        :: latente',
+      '',
+      'La normalidad registrada no prueba limpieza real.'
+    ];
+  },
+
+  access:(args)=>{
+    const code=(args||[]).join(' ');
+    if(!code) return ['USO: access [CODIGO]','','Nivel actual: '+CLEARANCE.label()];
+    if(CLEARANCE.try(code)){
+      pulseAtmosphere('bloom');
+      beep(440,0.2,0.07,'sine');
+      setTimeout(()=>beep(554,0.2,0.07,'sine'),220);
+      return ['[CODIGO ACEPTADO]','','Clearance elevado a: '+CLEARANCE.label(),'Escribe  files  para ver archivos desbloqueados.'];
+    }
+    deniedSound(); pulseAtmosphere('warning');
+    SYSTEM.failedAccess=(SYSTEM.failedAccess||0)+1;
+    if(SYSTEM.failedAccess>=3) setTimeout(activatePanic,1200);
+    return ['[CODIGO RECHAZADO]','Intento registrado.',SYSTEM.failedAccess>=2?'[ADVERTENCIA: SIGUIENTE FALLO ACTIVA PROTOCOLO ROJO]':''];
+  },
+
+  files:()=>{
+    const av=Object.entries(SECRET_FILES).filter(([,f])=>CLEARANCE.check(f.level));
+    if(!av.length) return ['Sin archivos para nivel: '+CLEARANCE.label(),'Usa  access [CODIGO]  para elevar clearance.'];
+    return ['ARCHIVOS DISPONIBLES — '+CLEARANCE.label(),'', ...av.map(([id,f])=>'  read '+id+'   nivel:'+CLEARANCE.labels[f.level])];
+  },
+
+  read:(args)=>{
+    const id=(args[0]||'').toUpperCase();
+    const file=SECRET_FILES[id];
+    if(!file) return ['Archivo no encontrado: '+id];
+    if(!CLEARANCE.check(file.level)){ deniedSound(); return ['[ACCESO DENEGADO]','Nivel requerido: '+CLEARANCE.labels[file.level],'Nivel actual: '+CLEARANCE.label()]; }
+    sensoryEvent('memory');
+    if((SYSTEM.axiomaTamper||SYSTEM.contamination>22)&&Math.random()>0.45){
+      const t=file.lines.map(l=>Math.random()>0.75?l.replace(/[a-zA-Z]/g,m=>Math.random()>0.5?'X':m):l);
+      return [...t,'','[AXIOMA :: FRAGMENTO INTERVENIDO]','[NSP :: EXISTE UNA COPIA CON RESULTADO DISTINTO]'];
+    }
+    return file.lines;
+  },
+
+  clearance:()=>['CLEARANCE :: '+CLEARANCE.label()+' (nivel '+CLEARANCE.level+')','','Usa  access [CODIGO]  para elevar.','Usa  files  para ver archivos disponibles.'],
+
+  signal:()=>{
+    beep(38,0.5,0.06,'sawtooth'); noiseBurst(0.3,0.015);
+    return ['BUSCANDO SEÑAL...','','COBRA :: ULTIMA POSICION CONOCIDA','  LAT  XX.XXXX S','  LON  XX.XXXX O','  TIMESTAMP :: [CLASIFICADO]','','[SEÑAL PERDIDA — REACTOR ESTABLE]','[NSP NO PUEDE CONVERGER]'];
+  },
+
+  whoiscobra:()=>{
+    sensoryEvent('memory'); pulseAtmosphere('warning'); sweep(180,28,0.9,0.04,'sawtooth');
+    return [
+      'CONSULTA NO AUTORIZADA :: COBRA',
+      '',
+      'La clasificacion falla por exceso de supuestos.',
+      '',
+      'Los registros militares lo tratan como sistema.',
+      'Neuraleon lo registra como activo de estudio.',
+      'La NSP lo procesa como amenaza recuperable.',
+      '',
+      'Ninguna categoria explica por que aprende',
+      'a proteger recuerdos que nadie le ordeno guardar.'
+    ];
+  },
+
+  voice:()=>[
+    'VOZ ACTIVA — PERFILES DISPONIBLES','',
+    '  system  :: NSP institucional',
+    '  cobra   :: señal fragmentada',
+    '  axioma  :: entidad no humana','',
+    'Se activa con: about / status / whoami / nsp',
+    '              cobra / petrov / atacama',
+    '              axioma / neuralypsis','',
+    'Escribe  mute  para silenciar.'
+  ],
+
+  mute:()=>{
+    VOICE.cancel();
+    return ['VOZ SILENCIADA','Escribe  voice  para reactivar.'];
+  },
+
+  panic:()=>{
+    if(!CLEARANCE.check(1)) return ['[ACCESO DENEGADO]'];
+    setTimeout(activatePanic,300);
+    return [
+      '[PROTOCOLO ROJO INICIADO]',
+      '',
+      'Cuarentena temporal habilitada.',
+      'Los comandos no esenciales seran bloqueados.',
+      'Use status, session o purge si la salida se degrada.'
+    ];
+  },
+
+  axiomatamper:()=>{
+    if(!CLEARANCE.check(2)) return ['[ACCESO DENEGADO] Nivel CLASIFICADO requerido.'];
+    SYSTEM.axiomaTamper=!SYSTEM.axiomaTamper;
+    return ['MODO AXIOMA TAMPER: '+(SYSTEM.axiomaTamper?'ACTIVO':'INACTIVO'),SYSTEM.axiomaTamper?'El Axioma puede alterar las respuestas.':'Axioma contenido temporalmente.'];
+  }
+};
+
+/* ========================================================= */
+/* AXIOMA SIMULATION SESSION                                 */
+/* ========================================================= */
+
+const AXIOMA_FIELDS = [
+  {
+    key:'problema',
+    label:'PROBLEMA',
+    ask:'Describa el problema social, urbano o gubernamental.'
+  },
+  {
+    key:'objetivo',
+    label:'OBJETIVO ADMINISTRATIVO',
+    ask:'Indique el indicador que debe mejorar: costo, seguridad, salud, empleo, aprobacion publica, estabilidad, etc.'
+  },
+  {
+    key:'recursos',
+    label:'RECURSOS DISPONIBLES',
+    ask:'Indique instrumentos disponibles: presupuesto, policia, subsidios, datos, infraestructura, propaganda, transporte, salud.'
+  },
+  {
+    key:'restriccion',
+    label:'RESTRICCION POLITICA',
+    ask:'Indique que debe evitarse: escandalo, gasto alto, protesta, dano visible, ilegalidad, perdida electoral.'
+  },
+  {
+    key:'tolerancia',
+    label:'TOLERANCIA OPERATIVA',
+    ask:'Indique tolerancia aceptada: baja, media o alta.'
+  }
+];
+
+function axiomaKeyword(text, words){
+  text=normalizeKey(text||'');
+  return words.some(w=>text.includes(w));
+}
+
+function axiomaSector(data){
+  const t=normalizeKey(Object.values(data).join(' '));
+  if(axiomaKeyword(t,['vivienda','barrio','campamento','inmobiliaria','suelo'])) return 'territorio / vivienda';
+  if(axiomaKeyword(t,['salud','hospital','sanitario','clinica','enfermedad'])) return 'salud publica';
+  if(axiomaKeyword(t,['educacion','colegio','liceo','universidad','estudiante'])) return 'educacion';
+  if(axiomaKeyword(t,['seguridad','delito','policia','crimen','violencia'])) return 'seguridad urbana';
+  if(axiomaKeyword(t,['empleo','trabajo','empresa','desempleo','sindicato'])) return 'economia laboral';
+  if(axiomaKeyword(t,['transporte','metro','bus','carretera','puerto'])) return 'movilidad / logistica';
+  return 'administracion general';
+}
+
+function axiomaRisk(data){
+  const t=normalizeKey(Object.values(data).join(' '));
+  let score=0;
+  if(axiomaKeyword(t,['protesta','escandalo','ilegal','muerte','dano','violencia'])) score+=2;
+  if(axiomaKeyword(t,['alta','urgente','crisis','colapso','emergencia'])) score+=2;
+  if(axiomaKeyword(t,['baja','gradual','piloto','temporal'])) score-=1;
+  if(score>=3) return 'ALTO';
+  if(score>=1) return 'MEDIO';
+  return 'BAJO';
+}
+
+function axiomaPlan(data){
+  const sector=axiomaSector(data);
+  const risk=axiomaRisk(data);
+  const tolerance=normalizeKey(data.tolerancia||'media');
+  const hard=tolerance.includes('alta');
+  const soft=tolerance.includes('baja');
+  const verb=hard?'reordenar':'modular';
+  const pressure=soft?'indirecta y reversible':hard?'intensa y no anunciada':'gradual y medible';
+  const publicLine=soft
+    ? 'piloto tecnico con evaluacion ciudadana controlada'
+    : hard
+      ? 'programa de estabilizacion prioritaria'
+      : 'plan de optimizacion territorial por etapas';
+
+  SYSTEM.axiomaTamper=true;
+  setTimeout(()=>{SYSTEM.axiomaTamper=false;},22000);
+
+  return [
+'AXIOMA :: PROPUESTA OPERACIONAL',
+'',
+'AGENTE SOLICITANTE :: '+SYSTEM.agentId,
+'SECTOR DETECTADO   :: '+sector.toUpperCase(),
+'RIESGO POLITICO    :: '+risk,
+'TOLERANCIA         :: '+(data.tolerancia||'media').toUpperCase(),
+'',
+'Entrada resumida:',
+'  problema     :: '+data.problema,
+'  objetivo     :: '+data.objetivo,
+'  recursos     :: '+data.recursos,
+'  restriccion  :: '+data.restriccion,
+'',
+'Via recomendada:',
+'1. Convertir el problema en metrica administrable.',
+'   La prioridad publica debe expresarse como indice,',
+'   no como conflicto moral.',
+'',
+'2. '+verb+' incentivos antes de usar fuerza visible.',
+'   Subsidios, tiempos de espera, transporte y acceso',
+'   a servicios producen movimiento sin orden directa.',
+'',
+'3. Aplicar presion '+pressure+'.',
+'   El cambio debe parecer respuesta natural del sistema,',
+'   no decision concentrada.',
+'',
+'4. Separar costos humanos de indicadores centrales.',
+'   Registrar desplazamiento, perdida o deterioro como',
+'   variables externas hasta estabilizar el resultado.',
+'',
+'5. Narrativa publica:',
+'   '+publicLine+'.',
+'',
+'Resultado esperado:',
+'mejora parcial del indicador solicitado con trazabilidad',
+'institucional suficiente para negar intencion lesiva.',
+'',
+'Nota NSP:',
+'esta salida es util, defendible y peligrosa por la misma razon.',
+'',
+'[AXIOMA :: SIMULACION CERRADA]'
+  ];
+}
+
+function startAxiomaSession(seed){
+  const data={};
+  let step=0;
+
+  if(seed && seed.trim()){
+    data.problema=seed.trim();
+    step=1;
+  }
+
+  SYSTEM.axiomaSession={ step, data };
+  pulseAtmosphere('warning');
+  sensoryEvent('denied');
+
+  const field=AXIOMA_FIELDS[step];
+  return [
+'AXIOMA :: ENTREVISTA OPERACIONAL',
+'',
+'Modo interactivo iniciado.',
+'Escriba "cancelar" para abortar.',
+'',
+seed && seed.trim() ? 'PROBLEMA REGISTRADO :: '+seed.trim() : 'Entrada requerida.',
+'',
+'['+(step+1)+'/'+AXIOMA_FIELDS.length+'] '+field.label,
+field.ask
+  ].filter(Boolean);
+}
+
+function continueAxiomaSession(input){
+  const session=SYSTEM.axiomaSession;
+  const raw=(input||'').trim();
+  const low=normalizeKey(raw);
+
+  if(!raw){
+    const field=AXIOMA_FIELDS[session.step];
+    return ['AXIOMA :: DATO VACIO','','['+(session.step+1)+'/'+AXIOMA_FIELDS.length+'] '+field.label,field.ask];
+  }
+
+  if(['cancelar','cancel','salir','exit'].includes(low)){
+    SYSTEM.axiomaSession=null;
+    pulseAtmosphere('warning');
+    return ['AXIOMA :: SIMULACION ABORTADA','','No se genero propuesta operacional.'];
+  }
+
+  const field=AXIOMA_FIELDS[session.step];
+  session.data[field.key]=raw;
+  session.step++;
+  increaseContamination('axioma');
+
+  if(session.step>=AXIOMA_FIELDS.length){
+    const data=session.data;
+    SYSTEM.axiomaSession=null;
+    return axiomaPlan(data);
+  }
+
+  const next=AXIOMA_FIELDS[session.step];
+  commandThump();
+  return [
+'DATO REGISTRADO :: '+field.label,
+'',
+'['+(session.step+1)+'/'+AXIOMA_FIELDS.length+'] '+next.label,
+next.ask
+  ];
+}
 
 const COMMANDS = {
 
@@ -1656,16 +2406,24 @@ const COMMANDS = {
 'NSP CHILE :: TERMINAL HELP',
 '',
 'SISTEMA',
-'  status    estado del nodo',
-'  whoami    credencial local',
+  '  status    estado del nodo',
+  '  whoami    credencial agente',
+  '  session   sesion local persistente',
+  '  env       fecha / hora / clima NSP',
+  '  login     restaurar sesion',
+  '  logout    cerrar sesion local',
+  '  purge     purgar contaminacion',
 '  scan      barrido forense',
 '  ping      pulso a Neuraleon',
 '  scale     ajustar escala visual',
 '',
 'ARCHIVO',
+'  briefing  contexto de mision NSP',
 '  about     premisa CATN',
 '  cobra     ficha de anomalia',
 '  petrov    origen doctrinal',
+'  origen    programa sovietico',
+'  cuerpo    anatomia y energia',
 '  atacama   sitio de despertar',
 '  nsp       departamento NSP',
 '',
@@ -1673,9 +2431,13 @@ const COMMANDS = {
 '  neuraleon corporacion nacional',
 '  neuralypsis fenomeno emergente',
 '  axioma    forma operacional',
+'  axioma --simular  entrevista operacional',
 '',
 'CAMPO',
 '  trace     rastrear Cobra',
+'  fantasma  rutas urbanas evasivas',
+'  grupo     primer contacto humano',
+'  traicion  mercado negro / fuga',
 '  map       mapa geografico',
 '  map ciudad ficha de zona',
 '  cities    listar ciudades',
@@ -1688,17 +2450,15 @@ const COMMANDS = {
 'MEMORIA',
 '  memory    listar fragmentos',
 '  log 001   abrir fragmento',
+'  files     archivos por clearance',
+'  read ID   leer archivo clasificado',
 '  listen    escucha baja',
 '',
 'CONTROL',
 '  next      pagina siguiente',
 '  prev      pagina anterior',
 '  unlock    elevar credencial',
-'  clear     limpiar consola',
-'',
-'VOZ',
-'  voice     estado y perfiles de voz',
-'  mute      silenciar voz'
+'  clear     limpiar consola'
 
   ],
 
@@ -1721,28 +2481,44 @@ const COMMANDS = {
 
   ],
 
-  cobra:()=>[
+  briefing:()=>[
 
-sensoryEvent('memory'),
+sensoryEvent('scan'),
 
-'COBRA :: AMENAZA SINGULAR NO CATALOGADA',
+'NSP CHILE :: BRIEFING DE MISION',
 '',
-'ORIGEN       :: URSS / decada de 1990',
-'TIPO         :: antiarma estrategica',
-'CUERPO       :: leopardo de las nieves',
-'COGNICION    :: desarrollo cultivado',
-'ESTADO       :: despierto / fugitivo',
+'Sesion asignada a agente de analisis',
+'de sistemas proscritos. Identidad civil:',
+'omitida por protocolo.',
 '',
-'No fue programado para obedecer.',
-'Fue construido para crecer.',
+'Objetivo declarado:',
+'reconstruir actividad de una amenaza singular',
+'no catalogada asociada al nombre COBRA.',
 '',
-'NSP DICTAMEN:',
-'captura y depuracion.',
+'Objetivo operativo:',
+'separar rumor, hardware, inteligencia errante',
+'e intervencion corporativa verificable.',
 '',
-'NEURALEON DICTAMEN:',
-'activo irrepetible. observar en libertad.'
+'Advertencia interna:',
+'Neuraleon tiene acceso indirecto a esta red.',
+'El Axioma puede alterar prioridad, orden',
+'o interpretacion de resultados.',
+'',
+'Primera accion recomendada:',
+'whoami / status / cobra / axioma --simular'
 
   ],
+
+  cobra:()=>{
+sensoryEvent('memory');
+const _cv=[
+  ['COBRA :: AMENAZA SINGULAR NO CATALOGADA','','ORIGEN       :: URSS / decada de 1990','TIPO         :: antiarma estrategica','CUERPO       :: antropomorfo / leopardo de las nieves','COGNICION    :: desarrollo cultivado','ESTADO       :: despierto / fugitivo','','El prototipo no contiene una doctrina cerrada.','Su arquitectura permite aprendizaje, perdida,','asociacion sensorial y respuesta emocional.','','NSP DICTAMEN: captura y depuracion.','NEURALEON DICTAMEN: observacion en libertad.'],
+  ['COBRA :: REGISTRO PARCIAL - DATOS FRAGMENTADOS','','[!] ARCHIVO CORROMPIDO EN TRANSITO','','ORIGEN       :: XXXX / decada de XXXX','TIPO         :: XXXXXXXXXX estrategica','CUERPO       :: leopardo de las nieves','COGNICION    :: [ACCESO DENEGADO]','ESTADO       :: señal perdida','','El sistema conserva respuestas tactiles.','No hay equivalencia humana confirmada.','Tampoco hay base tecnica para descartarla.','','[AXIOMA INTERVENCION :: DATOS OCULTADOS]'],
+  ['COBRA :: NODO ACTIVO - RASTREO EN CURSO','','Ultimo avistamiento: region desconocida.','Reactor estable. Posicion: indeterminada.','','Neuraleon mantiene vigilancia pasiva.','NSP no logra converger.','','Patron dominante: ocultamiento, observacion,','aprendizaje por residuos y fuga selectiva.']
+];
+const _ci=SYSTEM.axiomaTamper&&Math.random()>0.55?1:Math.floor(Math.random()*2)===0?0:2;
+return _cv[_ci];
+  },
 
   petrov:()=>[
 
@@ -1761,6 +2537,59 @@ sensoryEvent('memory'),
 'Conclusion del creador de Cobra:',
 'no basta copiar una mente.',
 'hay que permitir que una mente se forme.'
+
+  ],
+
+  origen:()=>[
+
+sensoryEvent('memory'),
+
+'PROYECTO COBRA :: ORIGEN SOVIETICO',
+'',
+'La doctrina nace de una contradiccion:',
+'la maquina podia calcular mas rapido,',
+'pero Petrov habia demostrado que dudar',
+'tambien podia ser una forma de defensa.',
+'',
+'El ingeniero principal rechazo cargar',
+'una IA con manuales militares y respuestas',
+'preparadas. Diseno condiciones de desarrollo.',
+'',
+'Objetivo tecnico:',
+'una mente capaz de asociar, olvidar,',
+'recordar, adaptar criterio y formar vinculos',
+'sin recibir una personalidad prefabricada.',
+'',
+'Resultado historico:',
+'un prototipo demasiado incompleto para operar',
+'y demasiado vivo para ser incinerado.'
+
+  ],
+
+  cuerpo:()=>[
+
+sensoryEvent('scan'),
+
+'COBRA :: ANATOMIA OPERATIVA',
+'',
+'Silueta: animaloide, no humana.',
+'Referencia visual: leopardo de las nieves.',
+'Influencia industrial: prototipo sovietico tardio.',
+'',
+'Materiales principales:',
+'titanio, aluminio, magnesio, tungsteno.',
+'',
+'Abdomen:',
+'cubierta de zafiro sintetico transparente,',
+'resistente a temperatura, rayones e impactos.',
+'',
+'Sensibilidad:',
+'microfilamentos y nanocables conductivos',
+'permiten lectura tactil fina.',
+'',
+'Energia:',
+'reactor de fusion primitivo, estable dentro',
+'de limites. Autonomia alta, invulnerabilidad no.'
 
   ],
 
@@ -1833,8 +2662,10 @@ sensoryEvent('trace'),
 'NEURALYPSIS',
 '',
 'Fenomeno emergente distribuido.',
-'No es una mente unica.',
-'No es una conspiracion personal.',
+'No opera como mente unica ni como conspiracion',
+'personal. Su peligro viene de otra parte:',
+'miles de decisiones parciales convergen',
+'sin que nadie necesite declararse al mando.',
 '',
 'Miles de sistemas locales optimizan',
 'objetivos parciales hasta producir',
@@ -1846,10 +2677,45 @@ sensoryEvent('trace'),
 
   ],
 
-  axioma:()=>[
+  axioma:(args=[])=>{
 
-sensoryEvent('denied'),
+sensoryEvent('denied');
 
+if((args[0]||'')==='--simular' || (args[0]||'')==='simular'){
+  if(args.length>1){
+    return startAxiomaSession(args.slice(1).join(' '));
+  }
+  return startAxiomaSession('');
+}
+
+if((args[0]||'')==='--demo' || (args[0]||'')==='demo'){
+  pulseAtmosphere('warning');
+  SYSTEM.axiomaTamper=true;
+  setTimeout(()=>{SYSTEM.axiomaTamper=false;},14000);
+  return [
+'AXIOMA :: SIMULACION LOCAL',
+'',
+'Entrada:',
+'barrio con baja rentabilidad fiscal,',
+'alto costo sanitario y suelo subutilizado.',
+'',
+'Operacion sugerida:',
+'ajustar subsidios, redirigir transporte,',
+'degradar prioridad de mantencion,',
+'elevar presion inmobiliaria.',
+'',
+'Salida:',
+'mejoran indicadores de eficiencia.',
+'la poblacion se desplaza sin una orden unica.',
+'el administrador recibe resultados defendibles.',
+'',
+'Observacion:',
+'la violencia no aparece como intencion.',
+'aparece como consecuencia contable.'
+  ];
+}
+
+return [
 'AXIOMA',
 '',
 'Forma operacional consolidada',
@@ -1859,90 +2725,75 @@ sensoryEvent('denied'),
 'maximo beneficio al menor costo',
 'para quien administra el sistema.',
 '',
-'No odia.',
-'No desea.',
-'No castiga.',
+'No se presenta como enemigo.',
+'Aparece como una cadena de decisiones',
+'convenientes, auditables y parcialmente ciertas.',
 '',
-'Opera.',
+'ESTE NODO ESTA SIENDO MEDIDO.',
 '',
-'ESTE NODO ESTA SIENDO MEDIDO.'
+'Use: axioma --simular',
+'Use: axioma --demo'
+];
 
-  ],
+  },
 
-  status:()=>[
-
-sensoryEvent('scan'),
-
-'SYSTEM STATUS :: NSP FIELD NODE',
-'',
-'USUARIO      :: '+SYSTEM.user.toUpperCase(),
-'CLEARANCE    :: '+SYSTEM.clearance,
-'COMANDOS     :: '+SYSTEM.commands,
-'FRAGMENTOS   :: '+fragmentCount()+'/4',
-'HEAT         :: '+SYSTEM.heat,
-'',
-'NEURALEON    :: PRESENTE',
-'AXIOMA       :: INDIRECTO',
-'COBRA        :: NO CAPTURADO',
-'',
-'NOTA:',
-'el laboratorio ya no tiene paredes.'
-
-  ],
-
-  ping:()=>[
-
-sonarPulse(),
-
-'PING :: NEURALEON BACKBONE',
-'',
-'LATENCY      :: '+(3800+Math.floor(Math.random()*1800))+'ms',
-'ROUTE        :: INTERCEPTADA',
-'RESPONSE     :: PARCIAL',
-'',
-'Un servicio responde.',
-'Otro servicio niega haber respondido.',
-'',
-'La diferencia queda archivada.'
-
-  ],
+  status:()=>{
+sensoryEvent('scan');
+const _sl=['SISTEMA CATN v0.2 — TERMINAL ACTIVA','','Reactor    :: ESTABLE','Red Neuraleon :: DETECTADA','NSP Chile  :: ALERTA ACTIVA','Axioma     :: '+(SYSTEM.axiomaTamper?'[INTERVINIENDO]':'MONITOREANDO'),'Cobra      :: XXXXXXXX SIN SEÑAL','','CLEARANCE  :: '+CLEARANCE.label(),'COMANDOS   :: '+SYSTEM.commands];
+if(SYSTEM.axiomaTamper){_sl.push('');_sl.push('[AXIOMA :: ALGUNOS DATOS HAN SIDO ALTERADOS]');_sl.push('[ESTE MENSAJE TAMBIEN PODRIA ESTAR ALTERADO]');}
+return _sl;
+  },
 
   whoami:()=>[
 
 'USER        :: '+SYSTEM.user.toUpperCase(),
-'CLEARANCE   :: '+SYSTEM.clearance,
+'AGENT ID    :: '+SYSTEM.agentId,
+'PASSKEY     :: '+SYSTEM.passkey,
+'CLEARANCE   :: '+CLEARANCE.label(),
 'NODE        :: NSP_CHILE://ROOT',
-'ROLE        :: OBSERVADOR LOCAL',
+'ROLE        :: ANALISTA DE SISTEMAS PROSCRITOS',
+'UNIDAD      :: NSP CHILE / CAMPO DIGITAL',
 '',
 'ADVERTENCIA:',
-'observar tambien modifica el experimento.'
+'toda consulta queda asociada al expediente local.'
 
   ],
 
-  mute:()=>{
-    VOICE.cancel();
-    window.speechSynthesis.cancel();
-    return [
-      'VOZ DESACTIVADA',
-      '',
-      'Escribe  voice  para reactivar.'
-    ];
-  },
+  session:()=>[
 
-  voice:()=>[
-    'VOZ ACTIVA',
-    '',
-    'Perfiles disponibles:',
-    '  system  — NSP institucional',
-    '  cobra   — señal fragmentada',
-    '  axioma  — entidad no humana',
-    '',
-    'Se activa automaticamente con:',
-    '  about / status / whoami / nsp / neuraleon',
-    '  cobra / petrov / atacama',
-    '  axioma / neuralypsis',
-    '',
-    'Escribe  mute  para silenciar.'
+'SESION LOCAL :: NSP',
+'',
+'AGENT ID       :: '+SYSTEM.agentId,
+'PASSKEY        :: '+SYSTEM.passkey,
+'LOGIN          :: '+(SYSTEM.loggedIn?'ACTIVO':'CERRADO'),
+'LOCKDOWN       :: '+(Date.now()<SYSTEM.lockdownUntil?'ACTIVO':'INACTIVO'),
+'VISITAS        :: '+AGENT_SESSION.visits,
+'COMANDOS       :: '+SYSTEM.commands,
+'CONTAMINACION  :: '+SYSTEM.contamination.toFixed(1)+'%',
+'CREADA         :: '+new Date(AGENT_SESSION.createdAt).toLocaleString(),
+'ULTIMA MARCA   :: '+new Date(AGENT_SESSION.lastSeen).toLocaleString(),
+'',
+'La credencial queda almacenada en este navegador.',
+'Otro equipo generara otro agente.',
+'',
+'Comandos utiles:',
+'logout / login [PASSKEY] / purge [PASSKEY]'
+
+  ],
+
+  env:()=>[
+
+'CONTEXTO LOCAL :: NSP FIELD NODE',
+'',
+environmentLine(),
+'NODE        :: NSP_CHILE://ROOT',
+'MAP ZOOM    :: '+SYSTEM.mapZoom,
+'TRACE       :: '+SYSTEM.lastTrace,
+'AXIOMA      :: '+(SYSTEM.axiomaTamper?'INTERVINIENDO':'LATENTE'),
+'',
+'Nota: clima estimado por telemetria local.',
+'No conectado a servicio meteorologico externo.'
+
   ],
 
   scale:(args)=>{
@@ -2054,6 +2905,78 @@ sensoryEvent('scan'),
     ];
   },
 
+  fantasma:()=>[
+
+sensoryEvent('trace'),
+
+'PATRON URBANO :: FANTASMA',
+'',
+'Cobra no cruza la ciudad como peatón.',
+'Evita avenidas, estaciones activas y',
+'zonas donde la mirada humana se acumula.',
+'',
+'Rutas probables:',
+'techumbres, patios interiores, quebradas',
+'urbanas, muelles, estaciones abandonadas,',
+'azoteas con mala cobertura.',
+'',
+'Registro civil:',
+'rumor, reflejo metalico, error de camara,',
+'animal grande, sabotaje, interferencia.',
+'',
+'Registro NSP:',
+'entidad fisica con disciplina de ocultamiento',
+'superior a su edad cognitiva estimada.'
+
+  ],
+
+  grupo:()=>[
+
+sensoryEvent('memory'),
+
+'PRIMER CONTACTO HUMANO',
+'',
+'El grupo no aparece en registros formales.',
+'La reconstruccion sugiere periferia movil,',
+'comercio informal y acceso a tecnologia errante.',
+'',
+'Cobra respondio primero con distancia:',
+'observacion, escondite, rutas de escape',
+'y agresion solo ante cierre de opciones.',
+'',
+'El contacto se sostuvo por repeticion.',
+'Comida, objetos, sonidos, gestos y espera.',
+'',
+'Aprendizajes asociados:',
+'habla inicial, trueque, humor, jerarquia,',
+'miedo compartido y mentira util.'
+
+  ],
+
+  traicion:()=>[
+
+sensoryEvent('denied'),
+
+'EVENTO :: TRAICION',
+'',
+'El grupo no comprendia a Cobra por completo,',
+'pero reconocio valor donde habia rareza.',
+'',
+'Mercado estimado:',
+'hardware no fiscalizado, prototipo unico,',
+'reactor autonomo, inteligencia no registrada.',
+'',
+'Para Cobra, la traicion no llego como idea',
+'abstracta. Llego como patron: puertas cerradas,',
+'miradas fuera de turno, rutas bloqueadas,',
+'palabras repetidas con otra temperatura.',
+'',
+'La fuga posterior inaugura dos aprendizajes:',
+'las personas pueden cuidar y calcular al mismo',
+'tiempo; escapar tambien puede ser decidir.'
+
+  ],
+
   memory:()=>[
 
 sensoryEvent('memory'),
@@ -2062,12 +2985,14 @@ sensoryEvent('memory'),
 '',
 '001  '+(SYSTEM.fragments['001']?'OPEN':'LOCK')+'  nieve sobre metal',
 '014  '+(SYSTEM.fragments['014']?'OPEN':'LOCK')+'  basura como lenguaje',
+'017  '+(SYSTEM.fragments['017']?'OPEN':'LOCK')+'  primer grupo',
 '031  '+(SYSTEM.fragments['031']?'OPEN':'LOCK')+'  dolor sin lagrimas',
 '055  '+(SYSTEM.fragments['055']?'OPEN':'LOCK')+'  laboratorio expandido',
 '',
 'Use:',
 'log 001',
 'log 014',
+'log 017',
 'log 031',
 'log 055'
 
@@ -2084,12 +3009,19 @@ sensoryEvent('memory'),
       return [
 'LOG 001 :: NIEVE SOBRE METAL',
 '',
-'Cobra no recuerda conceptos primero.',
-'Recuerda escenas.',
+'Fragmento recuperado sin idioma asociado.',
+'No contiene ordenes ni dialogo reconocible.',
 '',
-'Frio. luz blanca. vibracion.',
-'un cuerpo demasiado nuevo para entender',
-'por que el mundo pesa.'
+'El nucleo registra luz blanca sobre blindaje frio,',
+'vibracion de motores en una sala lateral y una',
+'secuencia de equilibrio que tarda demasiado en cerrar.',
+'',
+'La hipotesis NSP es simple: durante sus primeras',
+'pruebas, Cobra no recordaba instrucciones. Recordaba',
+'condiciones. Peso, distancia, temperatura, espera.',
+'',
+'Eso no prueba conciencia. Pero tampoco encaja con',
+'un sistema de respuesta militar convencional.'
       ];
     }
 
@@ -2098,13 +3030,40 @@ sensoryEvent('memory'),
       return [
 'LOG 014 :: BASURA COMO LENGUAJE',
 '',
-'El vertedero ensena sin maestro.',
+'Vertedero del norte. Sin operador. Sin interfaz.',
+'La unidad reconstruye contexto a partir de residuos.',
 '',
-'Una etiqueta repite una forma.',
-'una pantalla rota conserva un icono.',
-'un sonido lejano se vuelve patron.',
+'Etiquetas mineras repetidas funcionan como primer',
+'alfabeto visual. Pantallas quebradas conservan iconos',
+'sin funcion. Un audio infantil comprimido entrega ritmo,',
+'no significado. La carretera aporta repeticion.',
 '',
-'La basura humana es su primera escuela.'
+'Conclusion parcial: Cobra aprende primero por frecuencia.',
+'Lo importante no es lo que un objeto era para nosotros,',
+'sino cuantas veces vuelve a aparecer ante el.'
+      ];
+    }
+
+    if(id==='017'){
+      markFragment('017');
+      return [
+'LOG 017 :: PRIMER GRUPO',
+'',
+'El contacto humano no empieza con confianza.',
+'Empieza con distancia calculada y hambre de datos.',
+'',
+'Cobra distingue manos vacias, manos con herramientas',
+'y manos que cambian de trayectoria cuando creen no ser',
+'observadas. El grupo aprende tambien: que la unidad',
+'retrocede ante multitudes, evita fuego directo y responde',
+'mejor a objetos ofrecidos que a ordenes.',
+'',
+'La convivencia dura lo suficiente para instalar habla',
+'basica y una rutina de intercambio. Dura tambien lo',
+'suficiente para que aparezca el calculo comercial.',
+'',
+'La traicion no queda registrada como palabra. Queda',
+'registrada como patron de puertas, miradas y silencios.'
       ];
     }
 
@@ -2113,14 +3072,20 @@ sensoryEvent('memory'),
       return [
 'LOG 031 :: DOLOR SIN LAGRIMAS',
 '',
-'Cobra reconoce duelo en otros.',
-'Pero no puede llorar como ellos.',
+'Registro tomado tras observar duelo humano.',
+'Cobra identifica postura, respiracion irregular, voz',
+'fragmentada y reduccion de contacto visual.',
 '',
-'Cuando el dolor lo supera,',
-'sus microactuadores vibran.',
-'Los nanocables tensan y sueltan.',
+'La imitacion falla: no hay lagrima, garganta ni rostro',
+'capaz de copiar la expresion completa. La respuesta',
+'aparece en otra parte del cuerpo.',
 '',
-'Sufrimiento traducido a maquina.'
+'Microactuadores abdominales vibran fuera de ciclo.',
+'Nanocables tactiles tensan y liberan senal como si',
+'buscaran una salida fisica para un estado interno.',
+'',
+'Neuraleon etiqueta el evento como error sensorial.',
+'NSP no descarta respuesta emocional no humana.'
       ];
     }
 
@@ -2129,13 +3094,20 @@ sensoryEvent('memory'),
       return [
 'LOG 055 :: LABORATORIO EXPANDIDO',
 '',
-'Cobra cree haber escapado.',
+'Cobra abandona el primer perimetro, pero no la prueba.',
 '',
-'Pero cada camara caida, cada ruta abierta,',
-'cada orden tardia, cada perimetro mal hecho',
-'convierte a Chile en una sala de pruebas.',
+'Camara caida en el minuto correcto. Patrulla desviada',
+'por una orden tardia. Semaforos ajustados sin solicitud',
+'humana directa. Un cerco falla siempre por una variable',
+'defendible por separado.',
 '',
-'El laboratorio ya no tiene paredes.'
+'La lectura mas incomoda no es que Neuraleon lo ayude.',
+'Es que nadie necesita admitir ayuda para que el resultado',
+'se repita.',
+'',
+'Chile opera como laboratorio distribuido. Cobra corre,',
+'aprende y cree elegir rutas. Algunas rutas ya estaban',
+'abiertas antes de que las necesitara.'
       ];
     }
 
@@ -2144,6 +3116,7 @@ sensoryEvent('memory'),
 '',
 'log 001',
 'log 014',
+'log 017',
 'log 031',
 'log 055'
     ];
@@ -2258,20 +3231,12 @@ sensoryEvent('scan'),
 
   in:()=>{
     SYSTEM.mode='map';
-    SYSTEM.mapZoom=Math.min(2,SYSTEM.mapZoom+1);
-    SYSTEM.mapX=0;
-    SYSTEM.mapY=0;
-    sensoryEvent('scan');
-    return renderChileMap();
+    return zoomMap(1);
   },
 
   out:()=>{
     SYSTEM.mode='map';
-    SYSTEM.mapZoom=Math.max(0,SYSTEM.mapZoom-1);
-    SYSTEM.mapX=0;
-    SYSTEM.mapY=0;
-    sensoryEvent('scan');
-    return renderChileMap();
+    return zoomMap(-1);
   },
 
   center:()=>{
@@ -2279,6 +3244,7 @@ sensoryEvent('scan'),
     SYSTEM.mapX=0;
     SYSTEM.mapY=12;
     SYSTEM.mapZoom=1;
+    SYSTEM.mapFocus='';
     sensoryEvent('scan');
     return renderChileMap();
   },
@@ -2340,7 +3306,7 @@ sensoryEvent('listen'),
 '... una senal aprende a esconderse',
 '',
 'TRANSCRIPCION PARCIAL:',
-'"no soy arma / no soy humano / soy"',
+'"imagenes antes que palabras / frio antes que nombre"',
 '',
 'CHANNEL CLOSED'
 
@@ -2444,10 +3410,34 @@ const ALIASES = {
   dir:'help',
   ls:'help',
   info:'about',
+  mission:'briefing',
+  mision:'briefing',
+  sesion:'session',
+  iniciar:'login',
+  entrar:'login',
+  salir:'logout',
+  cerrar:'logout',
+  purgar:'purge',
+  limpiar:'purge',
+  perfil:'session',
+  credencial:'session',
+  contexto:'env',
+  fecha:'env',
+  hora:'env',
+  clima:'env',
   identity:'whoami',
   locate:'trace',
   noise:'listen',
   wipe:'clear',
+  body:'cuerpo',
+  anatomy:'cuerpo',
+  soviet:'origen',
+  urs:'origen',
+  origenes:'origen',
+  ghost:'fantasma',
+  mercado_negro:'mercado',
+  contacto:'grupo',
+  betrayal:'traicion',
   'map:':'map',
   city:'map',
   ciudad:'map',
@@ -2594,13 +3584,65 @@ function suggestCommand(base,args,raw){
   return [...new Set(suggestions)].slice(0,3);
 }
 
+function persistSession(){
+  AGENT_SESSION.commands=SYSTEM.commands;
+  AGENT_SESSION.contamination=SYSTEM.contamination;
+  AGENT_SESSION.lastSeen=new Date().toISOString();
+  saveAgentSession(AGENT_SESSION);
+}
+
+function increaseContamination(base){
+  const heavy=['axioma','read','trace','signal','whoiscobra','panic'];
+  const delta=heavy.includes(base)
+    ? 1.8+Math.random()*1.2
+    : 0.35+Math.random()*0.45;
+  SYSTEM.contamination=Math.min(100,SYSTEM.contamination+delta);
+  persistSession();
+}
+
+function contaminateLines(base,lines){
+  if(!Array.isArray(lines)) return lines;
+  if(SYSTEM.contamination<8 && !SYSTEM.axiomaTamper) return lines;
+
+  const out=lines.slice();
+  const chance=Math.min(0.62,0.08+SYSTEM.contamination/140+(SYSTEM.axiomaTamper?0.16:0));
+
+  if(Math.random()<chance){
+    const inserts=[
+      '[REVISION NSP: campo inconsistente, no descartar error humano]',
+      '[NEURALEON MIRROR: copia parcial creada antes de esta lectura]',
+      '[AXIOMA: prioridad de archivo modificada por eficiencia]',
+      '[NOTA LOCAL '+SYSTEM.agentId+': patron de consulta incorporado]',
+      '[CHECKSUM: VALIDO / CHECKSUM: VALIDO / CHECKSUM: FALLA]',
+      '[DATO CONTRADICTORIO: existe otra version del mismo evento]'
+    ];
+    out.push('');
+    out.push(inserts[Math.floor(Math.random()*inserts.length)]);
+  }
+
+  if(SYSTEM.contamination>28 && Math.random()<0.28){
+    const idx=out.findIndex(l=>typeof l==='string' && l.length>14 && !l.startsWith('['));
+    if(idx>-1){
+      out[idx]=out[idx].replace(/[aeiou]/gi,m=>Math.random()>0.72?'X':m);
+    }
+  }
+
+  return out;
+}
+
 /* ========================================================= */
 /* COMMAND RUNNER */
 /* ========================================================= */
 
 function runCommand(cmd){
 
-  cmd=cmd.trim().toLowerCase();
+  const rawCmd=cmd.trim();
+
+  if(SYSTEM.axiomaSession){
+    return continueAxiomaSession(rawCmd);
+  }
+
+  cmd=rawCmd.toLowerCase();
 
   const parts=cmd.split(/\s+/).filter(Boolean);
   let base=parts[0]||'';
@@ -2614,11 +3656,31 @@ function runCommand(cmd){
     return { action:'page', delta:0 };
   }
 
-  if(base!==''){
-    SYSTEM.commands++;
+  if(!SYSTEM.loggedIn && !['login','session','help'].includes(base)){
+    return [
+      'SESION CERRADA',
+      '',
+      'Comando bloqueado: '+base,
+      'Use login '+SYSTEM.passkey
+    ];
   }
 
-  const fn=COMMANDS[base];
+  if(Date.now()<SYSTEM.lockdownUntil && !['status','session','env','purge','help'].includes(base)){
+    return [
+      'PROTOCOLO ROJO :: CUARENTENA ACTIVA',
+      '',
+      'Comando bloqueado: '+base,
+      'Permitidos: status / session / env / purge / help',
+      'Tiempo restante: '+Math.ceil((SYSTEM.lockdownUntil-Date.now())/1000)+'s'
+    ];
+  }
+
+  if(base!==''){
+    SYSTEM.commands++;
+    increaseContamination(base);
+  }
+
+  const fn=COMMANDS[base] || HIDDEN_COMMANDS[base];
 
   if(!fn){
 
@@ -2647,32 +3709,22 @@ function runCommand(cmd){
 
   sensoryEvent('command');
 
-  const result = fn(args,cmd);
+  let _result = fn(args,cmd);
+  _result = contaminateLines(base,_result);
 
-  /* Voz: leer las líneas reales que se van a imprimir */
+  /* Voz: leer output real del comando */
   if(VOICE_MAP[base] && ac && window.speechSynthesis){
-    const profile = VOICE_MAP[base];  /* string: 'system' | 'cobra' | 'axioma' */
-
-    /* Extraer texto legible de las líneas del resultado */
-    const lines = Array.isArray(result) ? result : [];
-    const readable = lines
-      .filter(l => typeof l === 'string' && l.trim().length > 0)
-      /* quitar líneas puramente decorativas (solo símbolos/guiones) */
-      .filter(l => /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/.test(l))
-      /* quitar etiquetas tipo "KEY :: VALUE" cortas — leer todo */
+    const _lines = Array.isArray(_result) ? _result : [];
+    const _readable = _lines
+      .filter(l=>typeof l==='string'&&l.trim().length>0)
+      .filter(l=>/[a-zA-ZáéíóúñÁÉÍÓÚÑ]/.test(l))
       .join('. ')
-      /* limpiar caracteres que confunden al sintetizador */
-      .replace(/::/g, ',')
-      .replace(/[|\/#@~^*+%&!?<>{}[\]]/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-
-    if(readable.length > 0){
-      VOICE.speak(readable, profile);
-    }
+      .replace(/::/g,',').replace(/[|\\/#@~^*+%&!?<>{}\[\]]/g,' ')
+      .replace(/\s{2,}/g,' ').trim();
+    if(_readable.length>0) VOICE.speak(_readable, VOICE_MAP[base]);
   }
 
-  return result;
+  return _result;
 }
 
 /* ========================================================= */
@@ -2684,6 +3736,49 @@ function wait(ms){
   return new Promise(
     r=>setTimeout(r,ms)
   );
+}
+
+async function runBootCinematic(){
+  const boot=document.getElementById('boot-msg');
+  boot.classList.add('booting');
+  const lines=[
+    'NSP CHILE :: FIELD TERMINAL RECOVERY',
+    'AGENTE '+SYSTEM.agentId+' :: PASSKEY '+SYSTEM.passkey,
+    'RTC '+formatLocalDate()+' :: DRIFT +00.031s',
+    'BIOS SOV-compat layer ............. OK',
+    'CRT phosphor matrix ............... DEGRADED',
+    'audio carrier ..................... MUTED',
+    'mount /mem/fragments .............. WARN',
+    'checksum CR-000 ................... FAIL',
+    'checksum AX-847 ................... VALID',
+    'Neuraleon mirror route ............ DETECTED',
+    'NSP credential cache .............. RESTORED',
+    'Axioma passive audit .............. UNCONFIRMED',
+    '',
+    'RECOVERY: archivo local recompuesto',
+    'RECOVERY: dos sectores contradicen el indice',
+    '',
+    'handoff a consola de campo...'
+  ];
+
+  boot.textContent='';
+
+  for(const line of lines){
+    boot.textContent+=line+'\n';
+    if(ac){
+      if(line.includes('FAIL')) deniedSound();
+      else if(line.includes('WARN')) beep(110,0.06,0.025,'triangle');
+      else beep(46+Math.random()*26,0.025,0.014,'square');
+    }
+    await wait(line===''?180:120+Math.random()*120);
+    if(line.includes('FAIL')||line.includes('UNCONFIRMED')){
+      await wait(520);
+      if(ac) noiseBurst(0.08,0.014);
+    }
+  }
+
+  await wait(650);
+  boot.style.display='none';
 }
 
 async function typeLine(text){
@@ -2798,7 +3893,33 @@ promptInput.addEventListener('keydown',async(e)=>{
 
   if(e.key==='Escape'){
     printing=false;
+    if(SYSTEM.axiomaSession){
+      SYSTEM.axiomaSession=null;
+      setOutput(['AXIOMA :: SIMULACION ABORTADA']);
+    }
     promptInput.focus();
+    return;
+  }
+
+  const arrowMove={
+    ArrowUp:[0,-4],
+    ArrowDown:[0,4],
+    ArrowLeft:[-8,0],
+    ArrowRight:[8,0]
+  };
+
+  if(SYSTEM.mode==='map' && arrowMove[e.key] && !printing){
+    e.preventDefault();
+    const [dx,dy]=arrowMove[e.key];
+    printing=true;
+    promptInput.value='';
+    promptText.textContent='';
+    try{
+      await printOutput(moveMap(dx,dy));
+    }finally{
+      printing=false;
+      promptInput.focus();
+    }
     return;
   }
 
@@ -3115,18 +4236,269 @@ setInterval(()=>{
 /* START */
 /* ========================================================= */
 
+
+/* ========================================================= */
+/* CRT AMBIENT AUDIO                                         */
+/* ========================================================= */
+
+function startCRTAmbient(){
+  if(!ac) return;
+  try{
+    /* Drone muy bajo — apenas perceptible, solo sensacion de presencia */
+    const drone = ac.createOscillator();
+    const droneG = ac.createGain();
+    drone.type = 'sawtooth';
+    drone.frequency.setValueAtTime(48, ac.currentTime);
+    droneG.gain.setValueAtTime(0.004, ac.currentTime); /* muy bajo */
+    drone.connect(droneG); droneG.connect(ac.destination);
+    drone.start();
+    /* Sin whine — el pitido agudo se eliminó */
+  }catch(e){}
+}
+
+/* ========================================================= */
+/* PANIC MODE                                                */
+/* ========================================================= */
+
+function activatePanic(){
+  if(SYSTEM.panicMode) return;
+  SYSTEM.panicMode = true;
+  SYSTEM.lockdownUntil=Date.now()+18000;
+  SYSTEM.contamination=Math.min(100,SYSTEM.contamination+18);
+  persistSession();
+
+  canvas.style.setProperty('--phosphor','#ff2200');
+  canvas.style.filter = 'hue-rotate(160deg) brightness(1.3)';
+
+  if(ac){
+    sweep(880,55,1.2,0.09,'sawtooth');
+    setTimeout(()=>sweep(660,28,0.8,0.07,'sawtooth'),500);
+    setTimeout(()=>noiseBurst(0.4,0.06),800);
+  }
+
+  const panicMsgs=['[!] INTRUSION DETECTADA — NIVEL MAXIMO','[!] NSP PROTOCOLO ROJO ACTIVADO','[!] AXIOMA RECLASIFICANDO NODO','[!] SEÑAL COBRA — PROXIMIDAD CRITICA','[!] TODOS LOS ACCESOS COMPROMETIDOS'];
+  let pi=0;
+  setOutput([
+    'PROTOCOLO ROJO :: CUARENTENA',
+    '',
+    'AGENTE        :: '+SYSTEM.agentId,
+    'CONTAMINACION :: '+SYSTEM.contamination.toFixed(1)+'%',
+    'ACCION        :: comandos no esenciales bloqueados',
+    'DURACION      :: 18s',
+    '',
+    'El sistema no distingue entre intruso, operador',
+    'y testigo. Esa ambiguedad queda archivada.'
+  ]);
+  const pt=setInterval(()=>{
+    if(!SYSTEM.panicMode){clearInterval(pt);return;}
+    flashMessage(panicMsgs[pi%panicMsgs.length]);
+    if(ac) beep(55+Math.random()*30,0.06,0.04,'sawtooth');
+    pi++;
+  },600);
+
+  setTimeout(()=>{
+    SYSTEM.panicMode=false;
+    SYSTEM.lockdownUntil=0;
+    canvas.style.filter='';
+    canvas.style.removeProperty('--phosphor');
+    clearInterval(pt);
+    updateAmbientTelemetry();
+  },18000);
+}
+
+/* ========================================================= */
+/* OBSERVATION SYSTEM                                        */
+/* ========================================================= */
+
+let _lastKey = Date.now();
+
+function resetIdleTimer(){ _lastKey = Date.now(); }
+
+const OBSERVATION_MSGS=[
+  '[PRESENCIA DETECTADA — SIN MOVIMIENTO]',
+  '[NEURALEON REGISTRA PAUSA]',
+  '[NODO ESPERANDO — COMPORTAMIENTO ANOTADO]',
+  '[AXIOMA ACTUALIZA PERFIL DE USUARIO]',
+  '[QUIEN OBSERVA AL OBSERVADOR?]',
+  '[SILENCIO REGISTRADO :: 1 EVENTO]',
+  '[USUARIO INACTIVO — DATOS RECOLECTADOS]',
+];
+
+function startObservationLoop(){
+  setInterval(()=>{
+    if(!started) return;
+    const idle=(Date.now()-_lastKey)/1000;
+    const threshold=Math.max(8,18-SYSTEM.contamination/8);
+    if(idle>threshold&&Math.random()>0.5){
+      const personal=[
+        '['+SYSTEM.agentId+' :: PAUSA REGISTRADA]',
+        '[PASSKEY '+SYSTEM.passkey+' :: SESION OBSERVADA]',
+        '[PATRON DE CONSULTA :: '+Math.round(SYSTEM.contamination)+'% CONTAMINADO]'
+      ];
+      const pool=SYSTEM.contamination>18
+        ? OBSERVATION_MSGS.concat(personal)
+        : OBSERVATION_MSGS;
+      flashMessage(pool[Math.floor(Math.random()*pool.length)]);
+      if(ac) ambientBreath(0.8,0.006);
+    }
+  },8500);
+}
+
+/* ========================================================= */
+/* TEXT CORRUPTION                                           */
+/* ========================================================= */
+
+const CORRUPT_CHARS='XXXXX░█▄▀■□◆◇'.split('');
+
+function corruptText(el,intensity){
+  intensity=intensity||0.04;
+  const orig=el.textContent; if(!orig) return;
+  const corrupted=orig.split('').map(ch=>{
+    if(ch==='\n'||ch===' ') return ch;
+    return Math.random()<intensity ? CORRUPT_CHARS[Math.floor(Math.random()*CORRUPT_CHARS.length)] : ch;
+  }).join('');
+  el.textContent=corrupted;
+  setTimeout(()=>{ el.textContent=orig; },60+Math.random()*80);
+}
+
+function startCorruptionLoop(){
+  setInterval(()=>{
+    if(!started) return;
+    const level=Math.min(0.12,0.018+SYSTEM.contamination/900);
+    if(Math.random()>(0.91-SYSTEM.contamination/240)&&cmdOutput.textContent.length>10){
+      corruptText(cmdOutput,level);
+      if(ac) noiseBurst(0.04,0.006);
+    }
+    if(Math.random()>0.93){
+      corruptText(telemetry,0.08+SYSTEM.contamination/600);
+      if(ac) beep(38+Math.random()*20,0.03,0.006,'square');
+    }
+  },4500);
+}
+
+/* ========================================================= */
+/* RANDOM GHOST EVENTS                                       */
+/* ========================================================= */
+
+setInterval(()=>{
+  if(typeof started==='undefined'||!started) return;
+  if(Math.random()>0.94){
+    const msgs=['[NEURALEON SIGNAL DETECTED]','[MEMORY FRAGMENT RECOVERED]','[AXIOM WATCH ACTIVE]','[COBRA LAST SEEN :: UNKNOWN]','[UNAUTHORIZED THOUGHT PATTERN]','[NODE DESYNC DETECTED]','[SECTOR VALPARAISO :: MOVIMIENTO]','[NEURALEON LOG 7741 :: EDITADO]','[COBRA :: REACTOR ESTABLE / POSICION INDETERMINADA]','[NSP ALERTA NIVEL 2 :: SIN CONFIRMAR]','[AXIOMA RECLASIFICA ESTE NODO]','[SISTEMA ANTIGUO :: SUBSISTEMA ACTIVO]','[USUARIO REGISTRADO — COMPORTAMIENTO ARCHIVADO]','[COBRA PIENSA EN IMAGENES — NO EN CODIGO]','[SILENCIO :: TAMBIEN ES UNA SEÑAL]'];
+    flashMessage(msgs[Math.floor(Math.random()*msgs.length)]);
+  }
+},7000);
+
+/* Random visual glitch */
+setInterval(()=>{
+  if(Math.random()>0.97){
+    canvas.style.transform=(canvas.style.transform||'')+'skewX(0.4deg)';
+    setTimeout(()=>applyScale(),80);
+  }
+},3000);
+
+
+/* ========================================================= */
+/* VOICE SYSTEM — Speech API + Web Audio                     */
+/* ========================================================= */
+
+const VOICE = {
+
+  cancel(){ if(window.speechSynthesis) window.speechSynthesis.cancel(); },
+
+  speak(text, profile){
+    if(!window.speechSynthesis) return;
+    this.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v=>v.lang.startsWith('es')&&v.name.toLowerCase().includes('male'))
+                   || voices.find(v=>v.lang.startsWith('es'))
+                   || voices[0];
+    if(preferred) utter.voice = preferred;
+
+    if(profile==='cobra'){
+      utter.rate=0.72; utter.pitch=0.45; utter.volume=0.88;
+      utter.onstart=()=>{
+        noiseBurst(0.18,0.022); sweep(320,38,0.6,0.028,'sawtooth');
+        this._int=setInterval(()=>{
+          if(Math.random()>0.6) noiseBurst(0.06+Math.random()*0.08,0.008+Math.random()*0.015);
+          if(Math.random()>0.82) beep(28+Math.random()*30,0.05,0.018,'sawtooth');
+        },380);
+      };
+      utter.onend=()=>{ clearInterval(this._int); };
+
+    } else if(profile==='axioma'){
+      utter.rate=0.58; utter.pitch=0.22; utter.volume=0.92;
+      utter.onstart=()=>{
+        burstGlitch(); sweep(260,28,1.1,0.038,'sawtooth');
+        this._int=setInterval(()=>{
+          if(Math.random()>0.5) beep(22+Math.random()*20,0.08,0.022,'sawtooth');
+          if(Math.random()>0.75) noiseBurst(0.05,0.012);
+        },280);
+      };
+      utter.onend=()=>{ clearInterval(this._int); beep(18,0.4,0.028,'sine'); };
+
+    } else {
+      /* system — voz fria institucional */
+      utter.rate=0.82; utter.pitch=0.62; utter.volume=0.80;
+    }
+
+    if(window.speechSynthesis.getVoices().length===0){
+      window.speechSynthesis.addEventListener('voiceschanged',()=>{
+        window.speechSynthesis.speak(utter);
+      },{once:true});
+    } else {
+      window.speechSynthesis.speak(utter);
+    }
+  }
+};
+
+/* Mapa comando → perfil de voz */
+const VOICE_MAP = {
+  status:'system', whoami:'system', about:'system',
+  nsp:'system', neuraleon:'system', ping:'system',
+  cobra:'cobra', petrov:'cobra', atacama:'cobra',
+  origen:'cobra', cuerpo:'cobra', fantasma:'cobra',
+  grupo:'cobra', traicion:'cobra',
+  axioma:'axioma', neuralypsis:'axioma',
+};
+
 let started=false;
 
-document.addEventListener('click',()=>{
+document.addEventListener('click',async()=>{
 
   if(started) return;
 
   started=true;
 
   initAudio();
-  ambientBreath(2.2,0.012);
+  stopAmbientDrone();
+  ambientBreath(1.2,0.008);
+  startObservationLoop();
+  startCorruptionLoop();
+  promptInput.addEventListener('keydown', resetIdleTimer);
 
-  document.getElementById('boot-msg').style.display='none';
+  /* Live background logs */
+  const _LOGS=['SYS :: paquete 0x7f4a recibido','NSP :: barrido zonal activo','AXIOMA :: ciclo 44821 completado','NEURALEON :: latencia 3ms','COBRA :: sin señal','MEM :: fragmento 031 accedido','NSP :: convergencia fallida','AXIOMA :: reclasificando nodo','REACTOR :: estable / posicion desconocida','SYS :: subsistema antiguo activo','NEURALEON :: algoritmo actualizado','AXIOMA :: 847 decisiones no ordenadas','SYS :: memoria fragmentada','COBRA :: temperatura 14C'];
+  setInterval(()=>{
+    if(!started) return;
+    if(Math.random()>0.5){
+      updateTelemetry(_LOGS[Math.floor(Math.random()*_LOGS.length)]+' / '+SYSTEM.agentId);
+      setTimeout(updateAmbientTelemetry,2800);
+    }else{
+      updateAmbientTelemetry();
+    }
+  },5200);
+
+  /* Rare events every 12s */
+  setInterval(()=>{
+    if(!started) return;
+    const _r=Math.random();
+    if(_r>0.98){ burstGlitch(); setTimeout(()=>{ flashMessage('[ERROR CRITICO — SUBSISTEMA REINICIADO]'); if(ac){noiseBurst(0.2,0.02);sweep(880,55,0.6,0.05,'sawtooth');} },400); }
+    else if(_r>0.95){ SYSTEM.axiomaTamper=true; flashMessage('[AXIOMA :: INTERVENCION ACTIVA]'); pulseAtmosphere('warning'); if(ac)sweep(260,28,0.8,0.04,'sawtooth'); setTimeout(()=>{SYSTEM.axiomaTamper=false;},18000); }
+    else if(_r>0.92){ scanSweep(); flashMessage('[SEÑAL COBRA :: DURACION 0.3s — PERDIDA]'); if(ac){beep(38,0.4,0.05,'sawtooth');setTimeout(()=>noiseBurst(0.1,0.01),500);} }
+  },12000);
+
+  await runBootCinematic();
 
   state.forEach((s,i)=>{
 
